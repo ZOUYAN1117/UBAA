@@ -306,7 +306,7 @@ fun MainAppScreen(
             )
           AppScreen.EXAM -> ExamScreen(viewModel = examViewModel)
           AppScreen.COURSE_DETAIL ->
-            selectedCourse?.let { CourseDetailScreen(course = it, onBack = { navigateBack() }) }
+            selectedCourse?.let { CourseDetailScreen(course = it) }
           AppScreen.BYKC_HOME ->
             BykcHomeScreen(
               onSelectCourseClick = { navigateTo(AppScreen.BYKC_COURSES) },
