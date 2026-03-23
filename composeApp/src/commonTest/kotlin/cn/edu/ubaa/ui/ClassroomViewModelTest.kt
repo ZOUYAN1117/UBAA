@@ -44,43 +44,53 @@ class ClassroomViewModelTest {
   @Test
   fun `buildings are ordered by floorid string when each building has one unique floorid`() {
     val ordered =
-      sortBuildings(
-        linkedMapOf(
-          "三号教学楼" to
-            listOf(ClassroomInfo(id = "1", floorid = "2J03", name = "J3-101", kxsds = "1,2")),
-          "教零楼" to
-            listOf(ClassroomInfo(id = "2", floorid = "2J00", name = "J0-101", kxsds = "1,2")),
-          "一号教学楼" to
-            listOf(ClassroomInfo(id = "3", floorid = "2J01", name = "J1-101", kxsds = "1,2")),
-          "沙河校区二号楼" to
-            listOf(ClassroomInfo(id = "4", floorid = "2Z02", name = "SH2-101", kxsds = "1,2")),
-          "沙河校区三号楼" to
-            listOf(ClassroomInfo(id = "5", floorid = "2Z03", name = "SH3-101", kxsds = "1,2")),
+        sortBuildings(
+            linkedMapOf(
+                "三号教学楼" to
+                    listOf(
+                        ClassroomInfo(id = "1", floorid = "2J03", name = "J3-101", kxsds = "1,2")
+                    ),
+                "教零楼" to
+                    listOf(
+                        ClassroomInfo(id = "2", floorid = "2J00", name = "J0-101", kxsds = "1,2")
+                    ),
+                "一号教学楼" to
+                    listOf(
+                        ClassroomInfo(id = "3", floorid = "2J01", name = "J1-101", kxsds = "1,2")
+                    ),
+                "沙河校区二号楼" to
+                    listOf(
+                        ClassroomInfo(id = "4", floorid = "2Z02", name = "SH2-101", kxsds = "1,2")
+                    ),
+                "沙河校区三号楼" to
+                    listOf(
+                        ClassroomInfo(id = "5", floorid = "2Z03", name = "SH3-101", kxsds = "1,2")
+                    ),
+            )
         )
-      )
 
     assertEquals(
-      listOf("教零楼", "一号教学楼", "三号教学楼", "沙河校区二号楼", "沙河校区三号楼"),
-      ordered,
+        listOf("教零楼", "一号教学楼", "三号教学楼", "沙河校区二号楼", "沙河校区三号楼"),
+        ordered,
     )
   }
 
   @Test
   fun `falls back to natural ordering when a building has multiple floorids`() {
     val ordered =
-      sortBuildings(
-        linkedMapOf(
-          "10号楼" to
-            listOf(
-              ClassroomInfo(id = "1", floorid = "10", name = "10-101", kxsds = "1,2"),
-              ClassroomInfo(id = "2", floorid = "11", name = "10-102", kxsds = "1,2"),
-            ),
-          "2号楼" to
-            listOf(ClassroomInfo(id = "3", floorid = "2", name = "2-101", kxsds = "1,2")),
-          "教零楼" to
-            listOf(ClassroomInfo(id = "4", floorid = "0", name = "J0-101", kxsds = "1,2")),
+        sortBuildings(
+            linkedMapOf(
+                "10号楼" to
+                    listOf(
+                        ClassroomInfo(id = "1", floorid = "10", name = "10-101", kxsds = "1,2"),
+                        ClassroomInfo(id = "2", floorid = "11", name = "10-102", kxsds = "1,2"),
+                    ),
+                "2号楼" to
+                    listOf(ClassroomInfo(id = "3", floorid = "2", name = "2-101", kxsds = "1,2")),
+                "教零楼" to
+                    listOf(ClassroomInfo(id = "4", floorid = "0", name = "J0-101", kxsds = "1,2")),
+            )
         )
-      )
 
     assertEquals(listOf("2号楼", "10号楼", "教零楼"), ordered)
   }
@@ -88,14 +98,18 @@ class ClassroomViewModelTest {
   @Test
   fun `falls back when duplicate floorids exist across buildings`() {
     val analysis =
-      analyzeBuildingFloorIds(
-        linkedMapOf(
-          "一号楼" to
-            listOf(ClassroomInfo(id = "1", floorid = "2J01", name = "1-101", kxsds = "1,2")),
-          "二号楼" to
-            listOf(ClassroomInfo(id = "2", floorid = "2J01", name = "2-101", kxsds = "1,2")),
+        analyzeBuildingFloorIds(
+            linkedMapOf(
+                "一号楼" to
+                    listOf(
+                        ClassroomInfo(id = "1", floorid = "2J01", name = "1-101", kxsds = "1,2")
+                    ),
+                "二号楼" to
+                    listOf(
+                        ClassroomInfo(id = "2", floorid = "2J01", name = "2-101", kxsds = "1,2")
+                    ),
+            )
         )
-      )
 
     assertTrue(!analysis.canUseFloorIdOrdering)
   }
