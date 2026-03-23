@@ -18,6 +18,7 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.intOrNull
@@ -25,7 +26,6 @@ import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
-import kotlinx.serialization.json.JsonPrimitive
 
 data class CgyyApiEnvelope(
     val data: JsonElement?,
@@ -111,8 +111,7 @@ class CgyyZhjsClient(
             path = "/api/reservation/day/info",
             params = mapOf("searchDate" to searchDate, "venueSiteId" to venueSiteId),
         )
-    return response.data?.jsonObject
-        ?: throw CgyyException("研讨室可用性响应为空", "day_info_failed")
+    return response.data?.jsonObject ?: throw CgyyException("研讨室可用性响应为空", "day_info_failed")
   }
 
   override suspend fun createReservationOrder(
@@ -290,9 +289,7 @@ class CgyyZhjsClient(
           if (method != HttpMethod.Get) {
             val formParameters =
                 Parameters.build {
-                  form.forEach { (key, value) ->
-                    if (value != null) append(key, value.toString())
-                  }
+                  form.forEach { (key, value) -> if (value != null) append(key, value.toString()) }
                 }
             setBody(FormDataContent(formParameters))
           }
@@ -317,9 +314,8 @@ class CgyyZhjsClient(
     }
 
     val raw =
-        runCatching { json.parseToJsonElement(body).jsonObject }.getOrElse {
-          throw CgyyException("研讨室系统返回了非 JSON 响应", "cgyy_error")
-        }
+        runCatching { json.parseToJsonElement(body).jsonObject }
+            .getOrElse { throw CgyyException("研讨室系统返回了非 JSON 响应", "cgyy_error") }
     val code = raw["code"]?.jsonPrimitive?.intOrNull
     if (code != 200) {
       throw CgyyException(raw["message"]?.jsonPrimitive?.contentOrNull ?: "研讨室系统请求失败", "cgyy_error")
@@ -359,8 +355,7 @@ class CgyyZhjsClient(
             ?.jsonObject
             ?.get("access_token")
             ?.jsonPrimitive
-            ?.contentOrNull
-            ?: throw CgyyException("研讨室登录成功但未返回 access_token", "unauthenticated")
+            ?.contentOrNull ?: throw CgyyException("研讨室登录成功但未返回 access_token", "unauthenticated")
   }
 
   private fun isLoginRedirect(response: HttpResponse, body: String): Boolean {
@@ -406,11 +401,16 @@ class CgyyZhjsClient(
               ?.jsonArray
               ?.mapNotNull { siteElement ->
                 val site = siteElement.jsonObject
-                val siteId = site["id"]?.jsonPrimitive?.contentOrNull?.toIntOrNull() ?: return@mapNotNull null
+                val siteId =
+                    site["id"]?.jsonPrimitive?.contentOrNull?.toIntOrNull()
+                        ?: return@mapNotNull null
                 buildJsonObject {
                   put("id", JsonPrimitive(siteId))
                   put("venueId", JsonPrimitive(venueId))
-                  put("siteName", JsonPrimitive(site["siteName"]?.jsonPrimitive?.contentOrNull.orEmpty()))
+                  put(
+                      "siteName",
+                      JsonPrimitive(site["siteName"]?.jsonPrimitive?.contentOrNull.orEmpty()),
+                  )
                   put("venueName", JsonPrimitive(venueName))
                   put("campusName", JsonPrimitive(campusName))
                 }

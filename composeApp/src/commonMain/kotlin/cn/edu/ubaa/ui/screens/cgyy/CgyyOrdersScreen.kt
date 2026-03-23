@@ -71,12 +71,7 @@ fun CgyyOrdersScreen(viewModel: CgyyViewModel) {
   }
 
   Scaffold(snackbarHost = { SnackbarHost(snackbarHostState) }) { paddingValues ->
-    Box(
-        modifier =
-            Modifier.fillMaxSize()
-                .padding(paddingValues)
-                .pullRefresh(pullRefreshState)
-    ) {
+    Box(modifier = Modifier.fillMaxSize().padding(paddingValues).pullRefresh(pullRefreshState)) {
       when {
         uiState.isOrdersLoading && uiState.orders.content.isEmpty() ->
             CgyyLoadingState("正在加载预约记录...", modifier = Modifier.fillMaxSize())
@@ -147,7 +142,10 @@ private fun CgyyOrderCard(
         )
       }
 
-      Text(order.reservationDateDetail ?: order.reservationDate.orEmpty(), color = MaterialTheme.colorScheme.onSurfaceVariant)
+      Text(
+          order.reservationDateDetail ?: order.reservationDate.orEmpty(),
+          color = MaterialTheme.colorScheme.onSurfaceVariant,
+      )
       Text("主题：${order.theme.orEmpty()}", maxLines = 1, overflow = TextOverflow.Ellipsis)
       Text(
           "活动类型：${order.purposeTypeName ?: order.purposeType?.toString().orEmpty()}",

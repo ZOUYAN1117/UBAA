@@ -132,9 +132,7 @@ class CgyyApiTest {
                 content =
                     ByteReadChannel(
                         json.encodeToString(
-                            CgyyLockCodeResponse(
-                                buildJsonObject { put("password", "123456") }
-                            )
+                            CgyyLockCodeResponse(buildJsonObject { put("password", "123456") })
                         )
                     ),
                 status = HttpStatusCode.OK,
@@ -164,7 +162,14 @@ class CgyyApiTest {
                 content =
                     ByteReadChannel(
                         json.encodeToString(
-                            listOf(CgyyVenueSiteDto(id = 4, siteName = "二层", venueName = "老主楼研讨室", campusName = "学院路校区"))
+                            listOf(
+                                CgyyVenueSiteDto(
+                                    id = 4,
+                                    siteName = "二层",
+                                    venueName = "老主楼研讨室",
+                                    campusName = "学院路校区",
+                                )
+                            )
                         )
                     ),
                 status = HttpStatusCode.OK,
@@ -173,9 +178,7 @@ class CgyyApiTest {
         "/api/v1/cgyy/purpose-types" ->
             respond(
                 content =
-                    ByteReadChannel(
-                        json.encodeToString(listOf(CgyyPurposeTypeDto(3, "学术研讨类")))
-                    ),
+                    ByteReadChannel(json.encodeToString(listOf(CgyyPurposeTypeDto(3, "学术研讨类")))),
                 status = HttpStatusCode.OK,
                 headers = headersOf(HttpHeaders.ContentType, "application/json"),
             )

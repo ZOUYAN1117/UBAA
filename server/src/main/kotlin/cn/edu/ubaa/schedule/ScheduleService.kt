@@ -1,7 +1,7 @@
 package cn.edu.ubaa.schedule
 
-import cn.edu.ubaa.auth.GlobalSessionManager
 import cn.edu.ubaa.auth.ByxtService
+import cn.edu.ubaa.auth.GlobalSessionManager
 import cn.edu.ubaa.auth.LoginException
 import cn.edu.ubaa.auth.SessionManager
 import cn.edu.ubaa.model.dto.*

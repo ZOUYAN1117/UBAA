@@ -40,7 +40,8 @@ class CgyyService(
   }
 
   suspend fun getPurposeTypes(username: String): List<CgyyPurposeTypeDto> {
-    val dynamic = runCatching { parsePurposeTypes(getClient(username).getPurposeTypesRaw()) }.getOrNull()
+    val dynamic =
+        runCatching { parsePurposeTypes(getClient(username).getPurposeTypesRaw()) }.getOrNull()
     return if (!dynamic.isNullOrEmpty()) dynamic else fallbackPurposeTypes()
   }
 
@@ -114,11 +115,7 @@ class CgyyService(
                 isOffSchoolJoiner = if (request.isOffSchoolJoiner) 1 else 0,
             )
         val order =
-            submitResponse.data
-                ?.jsonObject
-                ?.get("orderInfo")
-                ?.jsonObject
-                ?.let { mapOrder(it) }
+            submitResponse.data?.jsonObject?.get("orderInfo")?.jsonObject?.let { mapOrder(it) }
         return CgyyReservationSubmitResponse(
             success = true,
             message = submitResponse.message.ifBlank { "预约成功" },
@@ -228,7 +225,8 @@ class CgyyService(
           CgyyTimeSlotDto(id = id, beginTime = begin, endTime = end, label = "$begin-$end")
         } ?: emptyList()
     val timeSlotIds = timeSlots.map { it.id }.toSet()
-    val dateKey = raw["reservationDateSpaceInfo"]?.jsonObject?.keys?.firstOrNull() ?: reservationDate
+    val dateKey =
+        raw["reservationDateSpaceInfo"]?.jsonObject?.keys?.firstOrNull() ?: reservationDate
     val spaces =
         raw["reservationDateSpaceInfo"]
             ?.jsonObject
@@ -245,13 +243,13 @@ class CgyyService(
                   venueSpaceGroupId = venueSpaceGroupId,
                   slots =
                       timeSlots.mapNotNull { slot ->
-                        val rawSlot = space[slot.id.toString()]?.jsonObject ?: return@mapNotNull null
+                        val rawSlot =
+                            space[slot.id.toString()]?.jsonObject ?: return@mapNotNull null
                         mapSlot(slot.id, rawSlot)
                       },
               )
             }
-            ?.sortedBy { it.spaceName }
-            ?: emptyList()
+            ?.sortedBy { it.spaceName } ?: emptyList()
     return CgyyDayInfoResponse(
         venueSiteId = venueSiteId,
         reservationDate = dateKey,
@@ -261,7 +259,9 @@ class CgyyService(
         timeSlots = timeSlots,
         spaces =
             spaces.map { space ->
-              space.copy(slots = space.slots.filter { it.timeId in timeSlotIds }.sortedBy { it.timeId })
+              space.copy(
+                  slots = space.slots.filter { it.timeId in timeSlotIds }.sortedBy { it.timeId }
+              )
             },
         reservationToken = raw["token"]?.jsonPrimitive?.contentOrNull,
         reservationTotalNum = raw["reservationTotalNum"]?.jsonPrimitive?.intOrNull,
@@ -273,7 +273,8 @@ class CgyyService(
     val tradeNo = raw["tradeNo"]?.jsonPrimitive?.contentOrNull
     val orderId = raw["orderId"]?.jsonPrimitive?.intOrNull
     val takeUp = raw["takeUp"]?.jsonPrimitive?.contentOrNull?.toBooleanStrictOrNull()
-    val isReservable = reservationStatus == 1 && tradeNo == null && orderId == null && takeUp != true
+    val isReservable =
+        reservationStatus == 1 && tradeNo == null && orderId == null && takeUp != true
     return CgyySlotStatusDto(
         timeId = timeId,
         reservationStatus = reservationStatus,
@@ -360,12 +361,15 @@ class CgyyService(
     )
   }
 
-  private fun purposeTypeName(key: Int): String? = fallbackPurposeTypes().firstOrNull { it.key == key }?.name
+  private fun purposeTypeName(key: Int): String? =
+      fallbackPurposeTypes().firstOrNull { it.key == key }?.name
 
-  private fun JsonArray.toStringList(): List<String> =
-      mapNotNull { it.jsonPrimitive.contentOrNull?.takeIf(String::isNotBlank) }
+  private fun JsonArray.toStringList(): List<String> = mapNotNull {
+    it.jsonPrimitive.contentOrNull?.takeIf(String::isNotBlank)
+  }
 
-  private fun JsonObject.string(key: String): String = this[key]?.jsonPrimitive?.contentOrNull.orEmpty()
+  private fun JsonObject.string(key: String): String =
+      this[key]?.jsonPrimitive?.contentOrNull.orEmpty()
 
   companion object {
     private const val DEFAULT_MAX_IDLE_MILLIS = 30 * 60 * 1000L

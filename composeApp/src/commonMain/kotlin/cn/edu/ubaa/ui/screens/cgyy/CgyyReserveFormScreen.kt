@@ -129,7 +129,10 @@ fun CgyyReserveFormScreen(
               isError = themeError,
               supportingText = { if (themeError) Text("请填写活动主题") },
           )
-          OutlinedButton(onClick = { showPurposeDialog = true }, modifier = Modifier.fillMaxWidth()) {
+          OutlinedButton(
+              onClick = { showPurposeDialog = true },
+              modifier = Modifier.fillMaxWidth(),
+          ) {
             Text(
                 uiState.purposeTypes.firstOrNull { it.key == uiState.purposeType }?.name ?: "选择活动类型"
             )

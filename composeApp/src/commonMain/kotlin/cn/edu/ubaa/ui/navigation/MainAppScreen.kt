@@ -106,7 +106,8 @@ fun MainAppScreen(
   val signinViewModel: SigninViewModel =
       viewModel(key = "signin-${userData.schoolid}") { SigninViewModel() }
   val evaluationViewModel: EvaluationViewModel = viewModel { EvaluationViewModel() }
-  val cgyyViewModel: CgyyViewModel = viewModel(key = "cgyy-${userData.schoolid}") { CgyyViewModel() }
+  val cgyyViewModel: CgyyViewModel =
+      viewModel(key = "cgyy-${userData.schoolid}") { CgyyViewModel() }
   val classroomViewModel: ClassroomViewModel = viewModel { ClassroomViewModel() }
   val spocViewModel: SpocViewModel =
       viewModel(key = "spoc-${userData.schoolid}") { SpocViewModel() }

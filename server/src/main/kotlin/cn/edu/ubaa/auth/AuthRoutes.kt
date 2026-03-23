@@ -134,7 +134,7 @@ fun Route.authRouting() {
                   user = session.userData,
                   lastActivity = session.lastActivity().toString(),
                   authenticatedAt = session.authenticatedAt.toString(),
-          )
+              )
           call.respond(HttpStatusCode.OK, statusResponse)
         } else {
           session?.let { sessionManager.invalidateSession(it.username) }

@@ -32,8 +32,7 @@ class CgyyCaptchaSolver : CgyyCaptchaAutoSolver {
     val moveDistance = solveOffset(background, piece)
     val pointJsonData = """{"x":$moveDistance,"y":5}"""
     val pointJson = encrypt(pointJsonData, challenge.secretKey)
-    val captchaVerification =
-        encrypt("${challenge.token}---$pointJsonData", challenge.secretKey)
+    val captchaVerification = encrypt("${challenge.token}---$pointJsonData", challenge.secretKey)
     return CgyySolvedCaptcha(moveDistance, pointJsonData, pointJson, captchaVerification)
   }
 
@@ -93,9 +92,7 @@ class CgyyCaptchaSolver : CgyyCaptchaAutoSolver {
 
   private fun decodeBase64Image(base64String: String): BufferedImage {
     val data =
-        base64String.substringAfter("base64,", base64String).let {
-          Base64.getDecoder().decode(it)
-        }
+        base64String.substringAfter("base64,", base64String).let { Base64.getDecoder().decode(it) }
     return ImageIO.read(ByteArrayInputStream(data))
         ?: throw CgyyException("验证码图片解码失败", "captcha_error")
   }
@@ -162,16 +159,12 @@ class CgyyCaptchaSolver : CgyyCaptchaAutoSolver {
   private fun crop(source: Array<IntArray>, bounds: IntArray): Array<IntArray> {
     val width = bounds[2] - bounds[0] + 1
     val height = bounds[3] - bounds[1] + 1
-    return Array(height) { y ->
-      IntArray(width) { x -> source[bounds[1] + y][bounds[0] + x] }
-    }
+    return Array(height) { y -> IntArray(width) { x -> source[bounds[1] + y][bounds[0] + x] } }
   }
 
   private fun crop(source: Array<BooleanArray>, bounds: IntArray): Array<BooleanArray> {
     val width = bounds[2] - bounds[0] + 1
     val height = bounds[3] - bounds[1] + 1
-    return Array(height) { y ->
-      BooleanArray(width) { x -> source[bounds[1] + y][bounds[0] + x] }
-    }
+    return Array(height) { y -> BooleanArray(width) { x -> source[bounds[1] + y][bounds[0] + x] } }
   }
 }

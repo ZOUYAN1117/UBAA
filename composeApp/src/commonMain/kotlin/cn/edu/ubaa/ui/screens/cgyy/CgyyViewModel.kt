@@ -100,13 +100,13 @@ class CgyyViewModel(
           _uiState.value.copy(
               isInitialLoading = false,
               sites = sites,
-              selectedCampus =
-                  _uiState.value.selectedCampus.ifBlank { ALL_CAMPUSES },
+              selectedCampus = _uiState.value.selectedCampus.ifBlank { ALL_CAMPUSES },
               purposeTypes = purposeTypes,
               selectedSiteId = siteId,
               purposeType = _uiState.value.purposeType ?: purposeTypes.firstOrNull()?.key,
               initialError =
-                  sitesResult.exceptionOrNull()?.message ?: purposeTypesResult.exceptionOrNull()?.message,
+                  sitesResult.exceptionOrNull()?.message
+                      ?: purposeTypesResult.exceptionOrNull()?.message,
           )
 
       if (siteId != null) {
@@ -131,10 +131,10 @@ class CgyyViewModel(
   fun setReserveCampus(campus: String) {
     val current = _uiState.value
     val campusSites =
-        if (campus == ALL_CAMPUSES) current.sites else current.sites.filter { it.campusName == campus }
+        if (campus == ALL_CAMPUSES) current.sites
+        else current.sites.filter { it.campusName == campus }
     val nextSiteId =
-        current.selectedSiteId
-            ?.takeIf { selectedId -> campusSites.any { it.id == selectedId } }
+        current.selectedSiteId?.takeIf { selectedId -> campusSites.any { it.id == selectedId } }
             ?: campusSites.firstOrNull()?.id
     _uiState.value =
         current.copy(
@@ -437,7 +437,8 @@ class CgyyViewModel(
             }
     if (slotLabels.isEmpty()) return null
     return CgyyReservationSummary(
-        siteLabel = listOf(site.venueName, site.siteName).filter { it.isNotBlank() }.joinToString(" "),
+        siteLabel =
+            listOf(site.venueName, site.siteName).filter { it.isNotBlank() }.joinToString(" "),
         reservationDate = state.selectedDate,
         spaceName = space.spaceName,
         slotLabels = slotLabels,

@@ -37,7 +37,10 @@ object ByxtService {
     if (status != HttpStatusCode.OK) return false
     if (finalUrl.contains("sso.buaa.edu.cn", ignoreCase = true)) return false
     val trimmed = body.trimStart()
-    if (trimmed.startsWith("<!DOCTYPE html", ignoreCase = true) || trimmed.startsWith("<html", ignoreCase = true)) {
+    if (
+        trimmed.startsWith("<!DOCTYPE html", ignoreCase = true) ||
+            trimmed.startsWith("<html", ignoreCase = true)
+    ) {
       return false
     }
     if (body.contains("input name=\"execution\"") || body.contains("统一身份认证", ignoreCase = true)) {

@@ -3,7 +3,6 @@ package cn.edu.ubaa.cgyy
 import java.awt.Color
 import java.awt.image.BufferedImage
 import kotlin.test.Test
-import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
 class CgyyCaptchaSolverTest {

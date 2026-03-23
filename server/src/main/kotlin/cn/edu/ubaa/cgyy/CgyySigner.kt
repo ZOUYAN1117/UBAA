@@ -27,9 +27,7 @@ class CgyySigner(
   }
 
   fun cleanParams(params: Map<String, Any?>): Map<String, Any?> {
-    return params
-        .filterKeys { it !in REMOVE_KEYS }
-        .filterValues { isPrimitiveForSign(it) }
+    return params.filterKeys { it !in REMOVE_KEYS }.filterValues { isPrimitiveForSign(it) }
   }
 
   fun addNoCacheIfMissing(params: Map<String, Any?>, timestamp: Long): Map<String, Any?> {

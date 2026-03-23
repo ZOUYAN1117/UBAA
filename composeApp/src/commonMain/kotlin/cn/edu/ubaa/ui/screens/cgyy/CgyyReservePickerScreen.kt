@@ -15,16 +15,15 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.ExperimentalMaterialApi
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.Search
-import androidx.compose.material.ExperimentalMaterialApi
 import androidx.compose.material.pullrefresh.PullRefreshIndicator
 import androidx.compose.material.pullrefresh.pullRefresh
 import androidx.compose.material.pullrefresh.rememberPullRefreshState
@@ -98,7 +97,8 @@ fun CgyyReservePickerScreen(
         val query = uiState.reserveSearchQuery.trim()
         query.isBlank() ||
             space.spaceName.contains(query, ignoreCase = true) ||
-            selectedSiteLabel(uiState.sites, uiState.selectedSiteId).contains(query, ignoreCase = true)
+            selectedSiteLabel(uiState.sites, uiState.selectedSiteId)
+                .contains(query, ignoreCase = true)
       }
   val pullRefreshState =
       rememberPullRefreshState(
@@ -127,7 +127,10 @@ fun CgyyReservePickerScreen(
           Button(
               onClick = onNext,
               enabled = viewModel.canAdvanceToReservationForm(),
-              modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp).height(52.dp),
+              modifier =
+                  Modifier.fillMaxWidth()
+                      .padding(horizontal = 16.dp, vertical = 12.dp)
+                      .height(52.dp),
           ) {
             Text("下一步")
           }
@@ -213,10 +216,8 @@ fun CgyyReservePickerScreen(
               CgyyLoadingState("正在刷新可预约时段...", modifier = Modifier.fillMaxSize())
           uiState.dayInfoError != null ->
               CgyyErrorState(uiState.dayInfoError, onRetry = viewModel::refreshReserveData)
-          uiState.selectedSiteId == null ->
-              CgyyEmptyState("请选择楼栋/层", "先从上方横向列表中选择一个研讨室位置。")
-          visibleSpaces.isEmpty() ->
-              CgyyEmptyState("暂无可预约教室", "当前楼栋或搜索条件下没有匹配教室。")
+          uiState.selectedSiteId == null -> CgyyEmptyState("请选择楼栋/层", "先从上方横向列表中选择一个研讨室位置。")
+          visibleSpaces.isEmpty() -> CgyyEmptyState("暂无可预约教室", "当前楼栋或搜索条件下没有匹配教室。")
           else ->
               CgyyReservationTable(
                   spaces = visibleSpaces,
@@ -282,9 +283,7 @@ private fun CgyyReservationTable(
                   .border(0.5.dp, MaterialTheme.colorScheme.outlineVariant),
       ) {
         CgyyTableCell("教室", 2.2f, true)
-        timeSlots.forEach { slot ->
-          CgyyTableCell(slotHeaderLabel(slot), 1.4f, true)
-        }
+        timeSlots.forEach { slot -> CgyyTableCell(slotHeaderLabel(slot), 1.4f, true) }
       }
     }
     items(spaces) { space ->
@@ -389,17 +388,15 @@ private fun slotHeaderLabel(slot: CgyyTimeSlotDto): String = "${slot.beginTime}\
 private fun selectedSiteLabel(sites: List<CgyyVenueSiteDto>, selectedSiteId: Int?): String =
     sites.firstOrNull { it.id == selectedSiteId }?.let(::siteSelectionLabel).orEmpty()
 
-private fun siteSelectionLabel(site: CgyyVenueSiteDto): String =
-    buildString {
-      append(shortVenueName(site.venueName))
-      if (site.siteName.isNotBlank()) {
-        append(" / ")
-        append(site.siteName)
-      }
-    }
+private fun siteSelectionLabel(site: CgyyVenueSiteDto): String = buildString {
+  append(shortVenueName(site.venueName))
+  if (site.siteName.isNotBlank()) {
+    append(" / ")
+    append(site.siteName)
+  }
+}
 
-private fun shortVenueName(name: String): String =
-    name.removeSuffix("研讨室").ifBlank { name }
+private fun shortVenueName(name: String): String = name.removeSuffix("研讨室").ifBlank { name }
 
 private fun campusDisplayName(name: String): String =
     when {

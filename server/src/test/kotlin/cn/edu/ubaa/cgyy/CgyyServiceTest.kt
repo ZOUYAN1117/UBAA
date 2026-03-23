@@ -3,17 +3,17 @@ package cn.edu.ubaa.cgyy
 import cn.edu.ubaa.model.dto.CgyyReservationSelectionDto
 import cn.edu.ubaa.model.dto.CgyyReservationSubmitRequest
 import cn.edu.ubaa.model.dto.CgyyVenueSiteDto
-import kotlin.test.assertFalse
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
-import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
@@ -117,7 +117,10 @@ class CgyyServiceTest {
   fun `status 2 slot is not treated as reservable`() = runTest {
     val gateway =
         object : FakeGateway() {
-          override suspend fun getReservationDayInfo(searchDate: String, venueSiteId: Int): JsonObject {
+          override suspend fun getReservationDayInfo(
+              searchDate: String,
+              venueSiteId: Int,
+          ): JsonObject {
             dayInfoCalls++
             return buildJsonObject {
               put("token", "day-token")

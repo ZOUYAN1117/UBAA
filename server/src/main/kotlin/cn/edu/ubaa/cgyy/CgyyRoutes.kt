@@ -132,8 +132,9 @@ fun Route.cgyyRouting() {
 private suspend fun ApplicationCall.respondCgyyError(e: CgyyException) {
   val status =
       when (e.code) {
-        "invalid_request", "reservation_invalid", "reservation_token_missing" ->
-            HttpStatusCode.BadRequest
+        "invalid_request",
+        "reservation_invalid",
+        "reservation_token_missing" -> HttpStatusCode.BadRequest
         "unauthenticated" -> HttpStatusCode.Unauthorized
         "captcha_error" -> HttpStatusCode.BadGateway
         else -> HttpStatusCode.BadGateway

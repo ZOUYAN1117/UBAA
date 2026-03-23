@@ -15,7 +15,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
@@ -45,7 +44,8 @@ import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
 
-internal fun shouldShowCancelAction(order: CgyyOrderDto): Boolean = order.displayStatus().isCancelable
+internal fun shouldShowCancelAction(order: CgyyOrderDto): Boolean =
+    order.displayStatus().isCancelable
 
 @Composable
 internal fun CgyyOrderDisplayColor.toComposeColor(): Color =
@@ -219,7 +219,10 @@ internal fun CgyyOrderDetailDialog(
             CgyyDetailRow("驳回原因", rejectionReason, MaterialTheme.colorScheme.error)
           }
           CgyyDetailRow("日期", order.reservationDateDetail ?: order.reservationDate.orEmpty())
-          CgyyDetailRow("场地", listOf(order.venueName, order.siteName).filterNotNull().joinToString(" "))
+          CgyyDetailRow(
+              "场地",
+              listOf(order.venueName, order.siteName).filterNotNull().joinToString(" "),
+          )
           CgyyDetailRow("房间", order.venueSpaceName.orEmpty())
           CgyyDetailRow("主题", order.theme.orEmpty())
           CgyyDetailRow("活动类型", order.purposeTypeName ?: order.purposeType?.toString().orEmpty())
@@ -238,9 +241,17 @@ internal fun CgyyOrderDetailDialog(
 }
 
 @Composable
-private fun CgyyDetailRow(label: String, value: String, color: Color = MaterialTheme.colorScheme.onSurface) {
+private fun CgyyDetailRow(
+    label: String,
+    value: String,
+    color: Color = MaterialTheme.colorScheme.onSurface,
+) {
   Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-    Text(label, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    Text(
+        label,
+        style = MaterialTheme.typography.labelMedium,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
     Text(value, style = MaterialTheme.typography.bodyMedium, color = color)
   }
 }

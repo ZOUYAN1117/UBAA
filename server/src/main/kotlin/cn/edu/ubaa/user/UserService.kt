@@ -31,7 +31,8 @@ class UserService(
       sessionManager.invalidateSession(username)
       throw LoginException("UC session expired")
     }
-    if (response.status != HttpStatusCode.OK) throw UserInfoException("Fetch failed: ${response.status}")
+    if (response.status != HttpStatusCode.OK)
+        throw UserInfoException("Fetch failed: ${response.status}")
 
     val resp =
         try {
@@ -51,7 +52,8 @@ class UserService(
 
   private fun isUcSessionExpired(response: HttpResponse, body: String): Boolean {
     if (response.status == HttpStatusCode.Unauthorized) return true
-    if (response.call.request.url.toString().contains("sso.buaa.edu.cn", ignoreCase = true)) return true
+    if (response.call.request.url.toString().contains("sso.buaa.edu.cn", ignoreCase = true))
+        return true
     val trimmed = body.trimStart()
     return trimmed.startsWith("<!DOCTYPE html", ignoreCase = true) ||
         trimmed.startsWith("<html", ignoreCase = true) ||

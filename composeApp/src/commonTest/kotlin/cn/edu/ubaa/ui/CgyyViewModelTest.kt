@@ -6,7 +6,6 @@ import cn.edu.ubaa.model.dto.CgyyLockCodeResponse
 import cn.edu.ubaa.model.dto.CgyyOrderDto
 import cn.edu.ubaa.model.dto.CgyyOrdersPageResponse
 import cn.edu.ubaa.model.dto.CgyyPurposeTypeDto
-import cn.edu.ubaa.model.dto.CgyyReservationSelectionDto
 import cn.edu.ubaa.model.dto.CgyyReservationSubmitRequest
 import cn.edu.ubaa.model.dto.CgyyReservationSubmitResponse
 import cn.edu.ubaa.model.dto.CgyySlotStatusDto
@@ -140,7 +139,9 @@ class CgyyViewModelTest {
 
     override suspend fun getVenueSites(): Result<List<CgyyVenueSiteDto>> {
       return Result.success(
-          listOf(CgyyVenueSiteDto(id = 4, siteName = "二层", venueName = "老主楼研讨室", campusName = "学院路校区"))
+          listOf(
+              CgyyVenueSiteDto(id = 4, siteName = "二层", venueName = "老主楼研讨室", campusName = "学院路校区")
+          )
       )
     }
 
@@ -216,9 +217,7 @@ class CgyyViewModelTest {
     }
 
     override suspend fun getLockCode(): Result<CgyyLockCodeResponse> {
-      return Result.success(
-          CgyyLockCodeResponse(buildJsonObject { put("password", "123456") })
-      )
+      return Result.success(CgyyLockCodeResponse(buildJsonObject { put("password", "123456") }))
     }
   }
 }
