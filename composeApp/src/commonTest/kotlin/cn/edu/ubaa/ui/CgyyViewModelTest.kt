@@ -69,8 +69,8 @@ class CgyyViewModelTest {
     assertNotNull(viewModel.uiState.value.reservationSummary)
     assertEquals("主204", viewModel.uiState.value.reservationSummary?.spaceName)
     assertEquals(
-            listOf("12:30-14:00", "14:00-15:35"),
-            viewModel.uiState.value.reservationSummary?.slotLabels,
+        listOf("12:30-14:00", "14:00-15:35"),
+        viewModel.uiState.value.reservationSummary?.slotLabels,
     )
   }
 
@@ -194,16 +194,16 @@ class CgyyViewModelTest {
     setMainDispatcher(testScheduler)
     CgyyReservationFormStore.clear()
     CgyyReservationFormStore.save(
-            StoredCgyyReservationForm(
-                    phone = "18800000000",
-                    theme = "课题讨论",
-                    purposeType = 3,
-                    joinerNum = "3",
-                    activityContent = "活动内容",
-                    joiners = "张三、李四",
-                    isPhilosophySocialSciences = false,
-                    isOffSchoolJoiner = false,
-            )
+        StoredCgyyReservationForm(
+            phone = "18800000000",
+            theme = "课题讨论",
+            purposeType = 3,
+            joinerNum = "3",
+            activityContent = "活动内容",
+            joiners = "张三、李四",
+            isPhilosophySocialSciences = false,
+            isOffSchoolJoiner = false,
+        )
     )
 
     val api = FakeCgyyApi()
@@ -232,18 +232,13 @@ class CgyyViewModelTest {
     var submitCalls = 0
     var ordersCalls = 0
     var purposeTypesResult: Result<List<CgyyPurposeTypeDto>> =
-            Result.success(listOf(CgyyPurposeTypeDto(3, "学术研讨类")))
+        Result.success(listOf(CgyyPurposeTypeDto(3, "学术研讨类")))
 
     override suspend fun getVenueSites(): Result<List<CgyyVenueSiteDto>> {
       return Result.success(
-              listOf(
-                      CgyyVenueSiteDto(
-                              id = 4,
-                              siteName = "二层",
-                              venueName = "老主楼研讨室",
-                              campusName = "学院路校区"
-                      )
-              )
+          listOf(
+              CgyyVenueSiteDto(id = 4, siteName = "二层", venueName = "老主楼研讨室", campusName = "学院路校区")
+          )
       )
     }
 
@@ -254,92 +249,92 @@ class CgyyViewModelTest {
     override suspend fun getDayInfo(venueSiteId: Int, date: String): Result<CgyyDayInfoResponse> {
       dayInfoCalls++
       return Result.success(
-              CgyyDayInfoResponse(
-                      venueSiteId = venueSiteId,
-                      reservationDate = date,
-                      availableDates = listOf(date),
-                      timeSlots =
+          CgyyDayInfoResponse(
+              venueSiteId = venueSiteId,
+              reservationDate = date,
+              availableDates = listOf(date),
+              timeSlots =
+                  listOf(
+                      CgyyTimeSlotDto(241, "12:30", "14:00", "12:30-14:00"),
+                      CgyyTimeSlotDto(242, "14:00", "15:35", "14:00-15:35"),
+                      CgyyTimeSlotDto(243, "15:35", "17:10", "15:35-17:10"),
+                  ),
+              spaces =
+                  listOf(
+                      CgyySpaceAvailabilityDto(
+                          spaceId = 6,
+                          spaceName = "主204",
+                          venueSiteId = venueSiteId,
+                          slots =
                               listOf(
-                                      CgyyTimeSlotDto(241, "12:30", "14:00", "12:30-14:00"),
-                                      CgyyTimeSlotDto(242, "14:00", "15:35", "14:00-15:35"),
-                                      CgyyTimeSlotDto(243, "15:35", "17:10", "15:35-17:10"),
+                                  CgyySlotStatusDto(
+                                      timeId = 241,
+                                      reservationStatus = 1,
+                                      isReservable = true,
+                                  ),
+                                  CgyySlotStatusDto(
+                                      timeId = 242,
+                                      reservationStatus = 1,
+                                      isReservable = true,
+                                  ),
+                                  CgyySlotStatusDto(
+                                      timeId = 243,
+                                      reservationStatus = 1,
+                                      isReservable = true,
+                                  ),
                               ),
-                      spaces =
+                      ),
+                      CgyySpaceAvailabilityDto(
+                          spaceId = 7,
+                          spaceName = "主205",
+                          venueSiteId = venueSiteId,
+                          slots =
                               listOf(
-                                      CgyySpaceAvailabilityDto(
-                                              spaceId = 6,
-                                              spaceName = "主204",
-                                              venueSiteId = venueSiteId,
-                                              slots =
-                                                      listOf(
-                                                              CgyySlotStatusDto(
-                                                                      timeId = 241,
-                                                                      reservationStatus = 1,
-                                                                      isReservable = true,
-                                                              ),
-                                                              CgyySlotStatusDto(
-                                                                      timeId = 242,
-                                                                      reservationStatus = 1,
-                                                                      isReservable = true,
-                                                              ),
-                                                              CgyySlotStatusDto(
-                                                                      timeId = 243,
-                                                                      reservationStatus = 1,
-                                                                      isReservable = true,
-                                                              ),
-                                                      ),
-                                      ),
-                                      CgyySpaceAvailabilityDto(
-                                              spaceId = 7,
-                                              spaceName = "主205",
-                                              venueSiteId = venueSiteId,
-                                              slots =
-                                                      listOf(
-                                                              CgyySlotStatusDto(
-                                                                      timeId = 241,
-                                                                      reservationStatus = 1,
-                                                                      isReservable = true,
-                                                              ),
-                                                              CgyySlotStatusDto(
-                                                                      timeId = 242,
-                                                                      reservationStatus = 1,
-                                                                      isReservable = true,
-                                                              ),
-                                                              CgyySlotStatusDto(
-                                                                      timeId = 243,
-                                                                      reservationStatus = 1,
-                                                                      isReservable = true,
-                                                              ),
-                                                      ),
-                                      ),
+                                  CgyySlotStatusDto(
+                                      timeId = 241,
+                                      reservationStatus = 1,
+                                      isReservable = true,
+                                  ),
+                                  CgyySlotStatusDto(
+                                      timeId = 242,
+                                      reservationStatus = 1,
+                                      isReservable = true,
+                                  ),
+                                  CgyySlotStatusDto(
+                                      timeId = 243,
+                                      reservationStatus = 1,
+                                      isReservable = true,
+                                  ),
                               ),
-              )
+                      ),
+                  ),
+          )
       )
     }
 
     override suspend fun submitReservation(
-            request: CgyyReservationSubmitRequest
+        request: CgyyReservationSubmitRequest
     ): Result<CgyyReservationSubmitResponse> {
       submitCalls++
       return Result.success(
-              CgyyReservationSubmitResponse(
-                      success = true,
-                      message = "预约成功",
-                      order = CgyyOrderDto(id = 1, theme = request.theme),
-              )
+          CgyyReservationSubmitResponse(
+              success = true,
+              message = "预约成功",
+              order = CgyyOrderDto(id = 1, theme = request.theme),
+          )
       )
     }
 
     override suspend fun getMyOrders(page: Int, size: Int): Result<CgyyOrdersPageResponse> {
       ordersCalls++
       return Result.success(
-              CgyyOrdersPageResponse(
-                      content = listOf(CgyyOrderDto(id = 1, theme = "讨论")),
-                      totalElements = 1,
-                      totalPages = 1,
-                      size = size,
-                      number = page,
-              )
+          CgyyOrdersPageResponse(
+              content = listOf(CgyyOrderDto(id = 1, theme = "讨论")),
+              totalElements = 1,
+              totalPages = 1,
+              size = size,
+              number = page,
+          )
       )
     }
 
