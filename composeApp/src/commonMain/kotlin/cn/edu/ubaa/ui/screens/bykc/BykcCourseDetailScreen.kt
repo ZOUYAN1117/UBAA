@@ -54,6 +54,15 @@ fun BykcCourseDetailScreen(
       }
     }
     course != null -> {
+      val isCourseFull =
+          remember(course.courseCurrentCount, course.courseMaxCount) {
+            course.courseMaxCount > 0 && course.courseCurrentCount >= course.courseMaxCount
+          }
+      val canSelectCourse =
+          !operationInProgress &&
+              !isCourseFull &&
+              course.status == BykcCourseStatus.AVAILABLE
+
       var now by remember { mutableStateOf<kotlin.time.Instant>(Clock.System.now()) }
       LaunchedEffect(Unit) {
         while (true) {
@@ -302,11 +311,20 @@ fun BykcCourseDetailScreen(
               Button(
                   onClick = onSelectClick,
                   modifier = Modifier.fillMaxWidth(),
-                  enabled = !operationInProgress && course.status == BykcCourseStatus.AVAILABLE,
+                  enabled = canSelectCourse,
               ) {
                 Icon(Icons.Default.Check, contentDescription = null)
                 Spacer(modifier = Modifier.width(8.dp))
                 Text("选择课程")
+              }
+              if (isCourseFull) {
+                Text(
+                    text = "该课程人数已满，当前不可选择。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.fillMaxWidth(),
+                    textAlign = TextAlign.Center,
+                )
               }
             }
           }
