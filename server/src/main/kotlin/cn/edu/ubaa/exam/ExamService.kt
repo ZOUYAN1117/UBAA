@@ -2,6 +2,7 @@ package cn.edu.ubaa.exam
 
 import cn.edu.ubaa.auth.GlobalSessionManager
 import cn.edu.ubaa.auth.SessionManager
+import cn.edu.ubaa.auth.ensureUndergradPortalAccess
 import cn.edu.ubaa.model.dto.ExamArrangementData
 import cn.edu.ubaa.model.dto.ExamResponse
 import cn.edu.ubaa.utils.VpnCipher
@@ -37,6 +38,13 @@ class ExamService(
    */
   suspend fun getExamArrangement(username: String, termCode: String): ExamArrangementData {
     val session = sessionManager.requireSession(username)
+    ensureUndergradPortalAccess(
+        sessionManager = sessionManager,
+        username = username,
+        session = session,
+        graduateUnsupportedMessage = "研究生账号暂不支持当前本科考试接口",
+        unavailableExceptionFactory = { ExamException("BYXT service unavailable") },
+    )
     val response = session.getExams(termCode)
     val body = response.bodyAsText()
 
