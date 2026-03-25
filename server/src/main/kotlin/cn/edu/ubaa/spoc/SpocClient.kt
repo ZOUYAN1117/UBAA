@@ -15,20 +15,24 @@ import io.ktor.http.HttpHeaders
 import io.ktor.http.contentType
 import java.net.URI
 import kotlinx.serialization.decodeFromString
+import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import org.slf4j.LoggerFactory
 
 /** SPOC 原始客户端。负责基于已登录的 SSO 会话完成 SPOC 二次登录并发起业务请求。 */
-internal open class SpocClient(private val username: String) {
+internal open class SpocClient(
+    private val username: String,
+    private val sessionManager: SessionManager = GlobalSessionManager.instance,
+) {
   private val log = LoggerFactory.getLogger(SpocClient::class.java)
-  private val sessionManager: SessionManager = GlobalSessionManager.instance
   private val json = Json { ignoreUnknownKeys = true }
+  private val requestJson = Json { encodeDefaults = true }
 
   private var token: String? = null
   private var refreshToken: String? = null
   private var roleCode: String? = null
 
-  suspend fun getCurrentTerm(): SpocCurrentTermContent {
+  open suspend fun getCurrentTerm(): SpocCurrentTermContent {
     return withAuthenticatedCall {
       postEnvelope<SpocCurrentTermContent, SpocQueryOneRequest>(
           "https://spoc.buaa.edu.cn/spocnewht/inco/ht/queryOne",
@@ -37,7 +41,7 @@ internal open class SpocClient(private val username: String) {
     }
   }
 
-  suspend fun getCourses(termCode: String): List<SpocCourseRaw> {
+  open suspend fun getCourses(termCode: String): List<SpocCourseRaw> {
     return withAuthenticatedCall {
       getEnvelope<List<SpocCourseRaw>>("https://spoc.buaa.edu.cn/spocnewht/jxkj/queryKclb") {
         parameter("kcmc", "")
@@ -46,20 +50,43 @@ internal open class SpocClient(private val username: String) {
     }
   }
 
-  suspend fun getAssignments(courseId: String): List<SpocAssignmentRaw> {
+  open suspend fun getAssignmentsPage(
+      termCode: String,
+      pageNum: Int,
+      pageSize: Int = DEFAULT_PAGE_SIZE,
+  ): SpocAssignmentsPageContent {
     return withAuthenticatedCall {
-      getEnvelope<SpocAssignmentListContent>(
-              "https://spoc.buaa.edu.cn/spocnewht/kczy/queryXsZyList"
-          ) {
-            parameter("sskcid", courseId)
-            parameter("flag", 1)
-            parameter("sflx", 2)
-          }
-          .list
+      val plainText =
+          requestJson.encodeToString(
+              SpocAssignmentsPageRequest(
+                  pageSize = pageSize,
+                  pageNum = pageNum,
+                  sqlid = ASSIGNMENTS_PAGE_SQL_ID,
+                  xnxq = termCode,
+              )
+          )
+      postEnvelope<SpocAssignmentsPageContent, SpocEncryptedParamRequest>(
+          "https://spoc.buaa.edu.cn/spocnewht/inco/ht/queryListByPage",
+          SpocEncryptedParamRequest(SpocCrypto.encryptParam(plainText)),
+      )
     }
   }
 
-  suspend fun getAssignmentDetail(assignmentId: String): SpocAssignmentDetailRaw {
+  open suspend fun getAllAssignments(termCode: String): List<SpocPagedAssignmentRaw> {
+    val assignments = mutableListOf<SpocPagedAssignmentRaw>()
+    var pageNum = 1
+    while (true) {
+      val page = getAssignmentsPage(termCode = termCode, pageNum = pageNum)
+      assignments += page.list
+      if (!page.hasNextPage || pageNum >= page.pages || page.list.isEmpty()) {
+        break
+      }
+      pageNum++
+    }
+    return assignments
+  }
+
+  open suspend fun getAssignmentDetail(assignmentId: String): SpocAssignmentDetailRaw {
     return withAuthenticatedCall {
       getEnvelope<SpocAssignmentDetailRaw>(
           "https://spoc.buaa.edu.cn/spocnewht/kczy/queryKczyInfoByid"
@@ -69,7 +96,7 @@ internal open class SpocClient(private val username: String) {
     }
   }
 
-  suspend fun getSubmission(assignmentId: String): SpocSubmissionRaw? {
+  open suspend fun getSubmission(assignmentId: String): SpocSubmissionRaw? {
     return withAuthenticatedCall {
       getEnvelope<SpocSubmissionRaw?>(
           "https://spoc.buaa.edu.cn/spocnewht/kczy/queryXsSubmitKczyInfo"
@@ -79,7 +106,7 @@ internal open class SpocClient(private val username: String) {
     }
   }
 
-  fun close() {
+  open fun close() {
     token = null
     refreshToken = null
     roleCode = null
@@ -229,5 +256,8 @@ internal open class SpocClient(private val username: String) {
   companion object {
     private const val CURRENT_TERM_PARAM =
         "YHrxtTavu6raCwC0/qdgYffB9evWHBkTng/XS4W6j3f/TPo02iEPSoegscDTRNzIPRG49o3RHl4JiFCXAiBkkA=="
+    private const val ASSIGNMENTS_PAGE_SQL_ID =
+        "1713252980496efac7d5d9985e81693116d3e8a52ebf2b"
+    private const val DEFAULT_PAGE_SIZE = 15
   }
 }

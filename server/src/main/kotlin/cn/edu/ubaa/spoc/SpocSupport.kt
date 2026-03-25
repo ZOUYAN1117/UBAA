@@ -4,6 +4,13 @@ import cn.edu.ubaa.model.dto.SpocAssignmentDetailDto
 import cn.edu.ubaa.model.dto.SpocAssignmentSummaryDto
 import cn.edu.ubaa.model.dto.SpocSubmissionStatus
 import java.net.URI
+import java.time.OffsetDateTime
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
+import java.util.Base64
+import javax.crypto.Cipher
+import javax.crypto.spec.IvParameterSpec
+import javax.crypto.spec.SecretKeySpec
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonElement
@@ -23,7 +30,33 @@ internal data class SpocLoginTokens(
     val refreshToken: String? = null,
 )
 
+internal object SpocCrypto {
+  private val keyBytes = "inco12345678ocni".toByteArray(Charsets.UTF_8)
+  private val ivBytes = "ocni12345678inco".toByteArray(Charsets.UTF_8)
+  private const val blockSize = 16
+
+  fun encryptParam(plainText: String): String {
+    val plainBytes = plainText.toByteArray(Charsets.UTF_8)
+    val padded = plainBytes + ByteArray((blockSize - plainBytes.size % blockSize) % blockSize)
+    val cipher = Cipher.getInstance("AES/CBC/NoPadding")
+    cipher.init(Cipher.ENCRYPT_MODE, SecretKeySpec(keyBytes, "AES"), IvParameterSpec(ivBytes))
+    return Base64.getEncoder().encodeToString(cipher.doFinal(padded))
+  }
+
+  fun decryptParam(cipherTextBase64: String): String {
+    val encrypted = Base64.getDecoder().decode(cipherTextBase64)
+    val cipher = Cipher.getInstance("AES/CBC/NoPadding")
+    cipher.init(Cipher.DECRYPT_MODE, SecretKeySpec(keyBytes, "AES"), IvParameterSpec(ivBytes))
+    val decrypted = cipher.doFinal(encrypted)
+    val endExclusive = decrypted.indexOfLast { it != 0.toByte() } + 1
+    return decrypted.copyOf(endExclusive.coerceAtLeast(0)).toString(Charsets.UTF_8)
+  }
+}
+
 internal object SpocParsers {
+  private val legacyDateTimeFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")
+  private val chinaZoneId = ZoneId.of("Asia/Shanghai")
+
   fun extractLoginTokens(url: String): SpocLoginTokens? {
     val uri = runCatching { URI.create(url) }.getOrNull() ?: return null
     if (!uri.path.orEmpty().contains("/spocnew/cas")) return null
@@ -56,11 +89,14 @@ internal object SpocParsers {
   }
 
   fun mapSubmissionStatus(rawStatus: String?, hasContent: Boolean): SpocSubmissionStatus {
-    return when {
-      !hasContent -> SpocSubmissionStatus.UNSUBMITTED
-      rawStatus == "1" -> SpocSubmissionStatus.SUBMITTED
-      rawStatus == "0" -> SpocSubmissionStatus.UNSUBMITTED
-      else -> SpocSubmissionStatus.UNKNOWN
+    return when (rawStatus?.trim()) {
+      "1",
+      "已做",
+      "已提交" -> SpocSubmissionStatus.SUBMITTED
+      "0",
+      "未做",
+      "未提交" -> SpocSubmissionStatus.UNSUBMITTED
+      else -> if (!hasContent) SpocSubmissionStatus.UNSUBMITTED else SpocSubmissionStatus.UNKNOWN
     }
   }
 
@@ -71,6 +107,19 @@ internal object SpocParsers {
       SpocSubmissionStatus.UNKNOWN ->
           rawStatus?.takeIf { it.isNotBlank() }?.let { "未知状态($it)" } ?: "未知状态"
     }
+  }
+
+  fun normalizeScore(rawScore: String?): String? {
+    val normalized = rawScore?.trim()?.takeIf { it.isNotEmpty() } ?: return null
+    return Regex("""-?\d+(?:\.\d+)?""").find(normalized)?.value ?: normalized
+  }
+
+  fun normalizeDateTime(rawValue: String?): String? {
+    val normalized = rawValue?.trim()?.takeIf { it.isNotEmpty() } ?: return null
+    return runCatching {
+          OffsetDateTime.parse(normalized).atZoneSameInstant(chinaZoneId).format(legacyDateTimeFormatter)
+        }
+        .getOrElse { normalized.replace('T', ' ').substringBefore('.') }
   }
 
   private fun firstString(element: JsonElement?): String? {
@@ -119,6 +168,18 @@ internal data class SpocEnvelope<T>(
 
 @Serializable internal data class SpocQueryOneRequest(val param: String)
 
+@Serializable internal data class SpocEncryptedParamRequest(val param: String)
+
+@Serializable
+internal data class SpocAssignmentsPageRequest(
+    val pageSize: Int,
+    val pageNum: Int,
+    val sqlid: String,
+    val xnxq: String,
+    val kcid: String = "",
+    val yzwz: String = "",
+)
+
 @Serializable
 internal data class SpocCurrentTermContent(
     val dqxq: String? = null,
@@ -162,6 +223,29 @@ internal data class SpocAssignmentDetailRaw(
 internal data class SpocSubmissionRaw(
     val tjzt: String? = null,
     val tjsj: String? = null,
+)
+
+@Serializable
+internal data class SpocAssignmentsPageContent(
+    val total: Int = 0,
+    val list: List<SpocPagedAssignmentRaw> = emptyList(),
+    val pageNum: Int = 1,
+    val pageSize: Int = 15,
+    val pages: Int = 1,
+    val hasNextPage: Boolean = false,
+)
+
+@Serializable
+internal data class SpocPagedAssignmentRaw(
+    val zyid: String,
+    val tjzt: String? = null,
+    val zyjzsj: String? = null,
+    val zymc: String,
+    val zykssj: String? = null,
+    val sskcid: String? = null,
+    val xnxq: String? = null,
+    val mf: String? = null,
+    val kcmc: String? = null,
 )
 
 @Serializable

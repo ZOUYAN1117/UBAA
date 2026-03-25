@@ -8,6 +8,10 @@ import kotlinx.serialization.json.Json
 
 class SpocSupportTest {
   private val json = Json
+  private val encryptedAssignmentsPageParam =
+      "hkJ9jAFVEMFUgJEjbOLv4eRZqXHIsmF+WbYaG1ipT1L1N+BbxRXtBj6Gcjri4Mo+y6q22/FkNm/isiC2+B+/hNejBx2cQJfNp9zoxorVJBa86sID0ROtPQ/2V07JCmVC3qsgIWBokL7EYyiPfilw+0ryJ6e61jRnLn90sQFosew="
+  private val plainAssignmentsPageParam =
+      """{"pageSize":15,"pageNum":1,"sqlid":"1713252980496efac7d5d9985e81693116d3e8a52ebf2b","xnxq":"2025-20262","kcid":"","yzwz":""}"""
 
   @Test
   fun `extract login tokens from cas redirect url`() {
@@ -54,6 +58,16 @@ class SpocSupportTest {
   }
 
   @Test
+  fun `spoc crypto decrypts known example`() {
+    assertEquals(plainAssignmentsPageParam, SpocCrypto.decryptParam(encryptedAssignmentsPageParam))
+  }
+
+  @Test
+  fun `spoc crypto encrypts known example`() {
+    assertEquals(encryptedAssignmentsPageParam, SpocCrypto.encryptParam(plainAssignmentsPageParam))
+  }
+
+  @Test
   fun `map submission status handles known and unknown cases`() {
     assertEquals(
         SpocSubmissionStatus.UNSUBMITTED,
@@ -71,6 +85,29 @@ class SpocSupportTest {
         SpocSubmissionStatus.UNKNOWN,
         SpocParsers.mapSubmissionStatus(rawStatus = "9", hasContent = true),
     )
+    assertEquals(
+        SpocSubmissionStatus.SUBMITTED,
+        SpocParsers.mapSubmissionStatus(rawStatus = "已做", hasContent = true),
+    )
+    assertEquals(
+        SpocSubmissionStatus.UNSUBMITTED,
+        SpocParsers.mapSubmissionStatus(rawStatus = "未做", hasContent = true),
+    )
+  }
+
+  @Test
+  fun `normalize score strips display prefix`() {
+    assertEquals("100", SpocParsers.normalizeScore("满分:100"))
+    assertEquals("0", SpocParsers.normalizeScore("满分:0"))
+    assertEquals("98.5", SpocParsers.normalizeScore("98.5"))
+    assertNull(SpocParsers.normalizeScore(null))
+  }
+
+  @Test
+  fun `normalize datetime converts iso offset to legacy format`() {
+    assertEquals("2026-03-31 23:59:59", SpocParsers.normalizeDateTime("2026-03-31T15:59:59.000+00:00"))
+    assertEquals("2026-03-24 16:00:00", SpocParsers.normalizeDateTime("2026-03-24T08:00:00.000+00:00"))
+    assertEquals("2026-03-24 16:00:00", SpocParsers.normalizeDateTime("2026-03-24 16:00:00"))
   }
 
   @Test

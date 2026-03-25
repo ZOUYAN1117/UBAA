@@ -18,29 +18,31 @@ internal class SpocService(private val clientProvider: (String) -> SpocClient = 
     val client = getClient(username)
     val term = client.getCurrentTerm()
     val termCode = term.mrxq ?: throw SpocException("无法获取 SPOC 当前学期代码")
-    val courses = client.getCourses(termCode)
+    val courseMap =
+        runCatching { client.getCourses(termCode).associateBy { it.kcid } }.getOrDefault(emptyMap())
+    val rawAssignments = client.getAllAssignments(termCode)
 
     val assignments =
-        courses
-            .flatMap { course ->
-              client.getAssignments(course.kcid).map { assignment ->
-                val submission = runCatching { client.getSubmission(assignment.id) }.getOrNull()
-                val hasSubmission = submission != null
-                val status = SpocParsers.mapSubmissionStatus(submission?.tjzt, hasSubmission)
-                SpocAssignmentSummaryDto(
-                    assignmentId = assignment.id,
-                    courseId = course.kcid,
-                    courseName = course.kcmc,
-                    teacherName = course.skjs,
-                    title = assignment.zymc,
-                    startTime = assignment.zykssj,
-                    dueTime = assignment.zyjzsj,
-                    score = assignment.zyfs,
-                    submissionStatus = status,
-                    submissionStatusText =
-                        SpocParsers.submissionStatusText(status, submission?.tjzt),
-                )
-              }
+        rawAssignments
+            .map { assignment ->
+              val course = assignment.sskcid?.let { courseMap[it] }
+              val status =
+                  SpocParsers.mapSubmissionStatus(
+                      rawStatus = assignment.tjzt,
+                      hasContent = !assignment.tjzt.isNullOrBlank(),
+                  )
+              SpocAssignmentSummaryDto(
+                  assignmentId = assignment.zyid,
+                  courseId = assignment.sskcid.orEmpty(),
+                  courseName = assignment.kcmc ?: course?.kcmc.orEmpty(),
+                  teacherName = course?.skjs,
+                  title = assignment.zymc,
+                  startTime = SpocParsers.normalizeDateTime(assignment.zykssj),
+                  dueTime = SpocParsers.normalizeDateTime(assignment.zyjzsj),
+                  score = SpocParsers.normalizeScore(assignment.mf),
+                  submissionStatus = status,
+                  submissionStatusText = SpocParsers.submissionStatusText(status, assignment.tjzt),
+              )
             }
             .sortedWith(
                 compareBy<SpocAssignmentSummaryDto> { it.dueTime ?: "9999-99-99 99:99:99" }
@@ -68,16 +70,16 @@ internal class SpocService(private val clientProvider: (String) -> SpocClient = 
 
     return summary
         .copy(
-            score = detail.zyfs ?: summary.score,
-            startTime = detail.zykssj ?: summary.startTime,
-            dueTime = detail.zyjzsj ?: summary.dueTime,
+            score = SpocParsers.normalizeScore(detail.zyfs) ?: summary.score,
+            startTime = SpocParsers.normalizeDateTime(detail.zykssj) ?: summary.startTime,
+            dueTime = SpocParsers.normalizeDateTime(detail.zyjzsj) ?: summary.dueTime,
             submissionStatus = status,
             submissionStatusText = SpocParsers.submissionStatusText(status, submission?.tjzt),
         )
         .toDetail(
             contentPlainText = SpocParsers.toPlainText(detail.zynr),
             contentHtml = detail.zynr,
-            submittedAt = submission?.tjsj,
+            submittedAt = SpocParsers.normalizeDateTime(submission?.tjsj),
         )
   }
 
