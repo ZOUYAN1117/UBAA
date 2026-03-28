@@ -197,8 +197,7 @@ class BykcService(
     return chosenCourses.map { chosen ->
       val course = chosen.courseInfo
       val signConfig = parseSignConfig(course?.courseSignConfig)
-      val availability =
-          resolveAttendanceAvailability(signConfig, chosen.checkin, chosen.pass, now)
+      val availability = resolveAttendanceAvailability(signConfig, chosen.checkin, chosen.pass, now)
       BykcChosenCourseDto(
           id = chosen.id,
           courseId = course?.id ?: 0L,
@@ -283,11 +282,14 @@ class BykcService(
       val chosen = findChosenCourseForCurrentSemester(client, courseId)
       if (chosen == null) return Result.failure(BykcException("该课程未选，无法签到"))
 
-      val signConfig = parseSignConfig(chosen.courseInfo?.courseSignConfig) ?: getSignConfig(client, courseId)
+      val signConfig =
+          parseSignConfig(chosen.courseInfo?.courseSignConfig) ?: getSignConfig(client, courseId)
       val now = nowProvider()
       val availability = resolveAttendanceAvailability(signConfig, chosen.checkin, chosen.pass, now)
       if (!availability.canSign) {
-        return Result.failure(BykcException(resolveSignInUnavailableReason(chosen.checkin, chosen.pass)))
+        return Result.failure(
+            BykcException(resolveSignInUnavailableReason(chosen.checkin, chosen.pass))
+        )
       }
 
       val (finalLat, finalLng) = randomSignLocation(signConfig, lat, lng)
@@ -311,7 +313,8 @@ class BykcService(
       val chosen = findChosenCourseForCurrentSemester(client, courseId)
       if (chosen == null) return Result.failure(BykcException("该课程未选，无法签退"))
 
-      val signConfig = parseSignConfig(chosen.courseInfo?.courseSignConfig) ?: getSignConfig(client, courseId)
+      val signConfig =
+          parseSignConfig(chosen.courseInfo?.courseSignConfig) ?: getSignConfig(client, courseId)
       val now = nowProvider()
       val availability = resolveAttendanceAvailability(signConfig, chosen.checkin, chosen.pass, now)
       if (!availability.canSignOut) {
@@ -366,7 +369,9 @@ class BykcService(
     val semesterStartDate = semester.semesterStartDate ?: throw BykcException("无法获取当前学期信息")
     val semesterEndDate = semester.semesterEndDate ?: throw BykcException("无法获取当前学期信息")
 
-    return client.queryChosenCourse(semesterStartDate, semesterEndDate).find { it.courseInfo?.id == courseId }
+    return client.queryChosenCourse(semesterStartDate, semesterEndDate).find {
+      it.courseInfo?.id == courseId
+    }
   }
 
   private suspend fun getSignConfig(client: BykcClient, courseId: Long): BykcSignConfigDto? {

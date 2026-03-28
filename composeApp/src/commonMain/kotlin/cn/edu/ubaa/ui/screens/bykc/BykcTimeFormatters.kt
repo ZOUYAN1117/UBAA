@@ -160,7 +160,8 @@ fun parseBykcDateTime(dateTime: String?): LocalDateTime? {
   }
 }
 
-private fun isBykcCheckinStateWaitingForSignOut(checkin: Int?): Boolean = checkin == 5 || checkin == 6
+private fun isBykcCheckinStateWaitingForSignOut(checkin: Int?): Boolean =
+    checkin == 5 || checkin == 6
 
 private fun isBykcCheckinStateBlockingAttendanceActions(checkin: Int?): Boolean =
     checkin != null && checkin != 0 && !isBykcCheckinStateWaitingForSignOut(checkin)

@@ -97,11 +97,12 @@ class BykcServiceDetailTest {
 
   @Test
   fun `getCourseDetail exposes sign in availability during sign in window`() = runBlocking {
-    val detail = createSignedCourseDetail(
-        now = LocalDateTime.parse("2025-11-26T18:50:00"),
-        checkin = 0,
-        pass = 0,
-    )
+    val detail =
+        createSignedCourseDetail(
+            now = LocalDateTime.parse("2025-11-26T18:50:00"),
+            checkin = 0,
+            pass = 0,
+        )
 
     assertTrue(detail.canSign)
     assertFalse(detail.canSignOut)
@@ -109,11 +110,12 @@ class BykcServiceDetailTest {
 
   @Test
   fun `getCourseDetail exposes sign out availability at sign out boundary`() = runBlocking {
-    val detail = createSignedCourseDetail(
-        now = LocalDateTime.parse("2025-11-26T21:20:00"),
-        checkin = 5,
-        pass = 0,
-    )
+    val detail =
+        createSignedCourseDetail(
+            now = LocalDateTime.parse("2025-11-26T21:20:00"),
+            checkin = 5,
+            pass = 0,
+        )
 
     assertFalse(detail.canSign)
     assertTrue(detail.canSignOut)
@@ -121,11 +123,12 @@ class BykcServiceDetailTest {
 
   @Test
   fun `getCourseDetail keeps sign actions disabled outside window`() = runBlocking {
-    val detail = createSignedCourseDetail(
-        now = LocalDateTime.parse("2025-11-26T18:40:00"),
-        checkin = 0,
-        pass = 0,
-    )
+    val detail =
+        createSignedCourseDetail(
+            now = LocalDateTime.parse("2025-11-26T18:40:00"),
+            checkin = 0,
+            pass = 0,
+        )
 
     assertFalse(detail.canSign)
     assertFalse(detail.canSignOut)
@@ -133,11 +136,12 @@ class BykcServiceDetailTest {
 
   @Test
   fun `getCourseDetail keeps sign actions disabled after pass`() = runBlocking {
-    val detail = createSignedCourseDetail(
-        now = LocalDateTime.parse("2025-11-26T18:55:00"),
-        checkin = 0,
-        pass = 1,
-    )
+    val detail =
+        createSignedCourseDetail(
+            now = LocalDateTime.parse("2025-11-26T18:55:00"),
+            checkin = 0,
+            pass = 1,
+        )
 
     assertFalse(detail.canSign)
     assertFalse(detail.canSignOut)
