@@ -18,6 +18,7 @@ import cn.edu.ubaa.signin.signinRouting
 import cn.edu.ubaa.spoc.GlobalSpocService
 import cn.edu.ubaa.spoc.spocRouting
 import cn.edu.ubaa.user.userRouting
+import cn.edu.ubaa.utils.HeadlessImageSupport
 import io.github.cdimascio.dotenv.dotenv
 import io.ktor.http.*
 import io.ktor.serialization.kotlinx.json.*
@@ -46,6 +47,7 @@ import org.slf4j.event.Level
 
 /** 后端服务入口函数。 负责加载环境变量、配置服务器端口并启动 Netty 引擎。 */
 fun main() {
+  HeadlessImageSupport.ensureConfigured()
   val dotenv = dotenv { ignoreIfMissing = true }
   val serverPort = dotenv["SERVER_PORT"]?.toInt() ?: 5432
   val serverHost = dotenv["SERVER_BIND_HOST"] ?: "0.0.0.0"

@@ -1,47 +1,30 @@
-const CACHE_NAME = 'ubaa-cache-v1';
-const ASSETS_TO_CACHE = [
-    './',
-    './index.html',
-    './manifest.json',
-    './styles.css',
-    './composeApp.js',
-    './pwa-icon.svg'
-];
+const CACHE_PREFIX = 'ubaa-cache-';
 
-// Install event: Cache assets
 self.addEventListener('install', (event) => {
-    event.waitUntil(
-        caches.open(CACHE_NAME).then((cache) => {
-            console.log('[Service Worker] Caching all: app shell and content');
-            return cache.addAll(ASSETS_TO_CACHE);
-        })
-    );
+    event.waitUntil(self.skipWaiting());
 });
 
-// Fetch event: Serve from cache, fall back to network
-self.addEventListener('fetch', (event) => {
-    event.respondWith(
-        caches.match(event.request).then((response) => {
-            if (response) {
-                return response;
-            }
-            return fetch(event.request);
-        })
-    );
-});
-
-// Activate event: Clean up old caches
 self.addEventListener('activate', (event) => {
-    const cacheWhitelist = [CACHE_NAME];
-    event.waitUntil(
-        caches.keys().then((cacheNames) => {
-            return Promise.all(
-                cacheNames.map((cacheName) => {
-                    if (cacheWhitelist.indexOf(cacheName) === -1) {
-                        return caches.delete(cacheName);
-                    }
-                })
-            );
-        })
-    );
+    event.waitUntil((async () => {
+        const cacheNames = await caches.keys();
+        await Promise.all(
+            cacheNames
+                .filter((cacheName) => cacheName.startsWith(CACHE_PREFIX))
+                .map((cacheName) => caches.delete(cacheName))
+        );
+
+        await self.clients.claim();
+        await self.registration.unregister();
+
+        const clients = await self.clients.matchAll({
+            type: 'window',
+            includeUncontrolled: true
+        });
+
+        await Promise.all(
+            clients.map((client) =>
+                client.navigate(client.url).catch(() => null)
+            )
+        );
+    })());
 });

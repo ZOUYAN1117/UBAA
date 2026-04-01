@@ -1,5 +1,6 @@
 package cn.edu.ubaa.cgyy
 
+import cn.edu.ubaa.utils.HeadlessImageSupport
 import java.awt.image.BufferedImage
 import java.io.ByteArrayInputStream
 import java.util.Base64
@@ -26,6 +27,10 @@ interface CgyyCaptchaAutoSolver {
 }
 
 class CgyyCaptchaSolver : CgyyCaptchaAutoSolver {
+  init {
+    HeadlessImageSupport.ensureConfigured()
+  }
+
   override fun solve(challenge: CgyyCaptchaChallenge): CgyySolvedCaptcha {
     val background = decodeBase64Image(challenge.originalImageBase64)
     val piece = decodeBase64Image(challenge.jigsawImageBase64)
