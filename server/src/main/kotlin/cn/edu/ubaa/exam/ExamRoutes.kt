@@ -37,7 +37,8 @@ fun Route.examRouting() {
               is UnsupportedAcademicPortalException -> HttpStatusCode.NotImplemented
               else -> HttpStatusCode.BadGateway
             }
-        val code = if (e is UnsupportedAcademicPortalException) "unsupported_portal" else "exam_error"
+        val code =
+            if (e is UnsupportedAcademicPortalException) "unsupported_portal" else "exam_error"
         call.respondError(status, code)
       }
     }

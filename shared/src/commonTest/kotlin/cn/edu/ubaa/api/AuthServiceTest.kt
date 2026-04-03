@@ -99,7 +99,10 @@ class AuthServiceTest {
               ByteReadChannel(
                   json.encodeToString(
                       ApiErrorResponse(
-                          ApiErrorDetails(code = "invalid_credentials", message = "Invalid credentials")
+                          ApiErrorDetails(
+                              code = "invalid_credentials",
+                              message = "Invalid credentials",
+                          )
                       )
                   )
               ),

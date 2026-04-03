@@ -162,7 +162,10 @@ fun Route.bykcRouting() {
                   call.respond(
                       HttpStatusCode.BadRequest,
                       ErrorResponse(
-                          ErrorDetails("deselect_failed", cn.edu.ubaa.auth.userFacingMessage("deselect_failed"))
+                          ErrorDetails(
+                              "deselect_failed",
+                              cn.edu.ubaa.auth.userFacingMessage("deselect_failed"),
+                          )
                       ),
                   )
                 },
@@ -257,7 +260,10 @@ private suspend fun ApplicationCall.respondBykcError(error: Throwable) {
       when (error) {
         is LoginException ->
             HttpStatusCode.Unauthorized to
-                ErrorDetails("unauthenticated", cn.edu.ubaa.auth.userFacingMessage("unauthenticated"))
+                ErrorDetails(
+                    "unauthenticated",
+                    cn.edu.ubaa.auth.userFacingMessage("unauthenticated"),
+                )
         is UpstreamTimeoutException ->
             HttpStatusCode.GatewayTimeout to
                 ErrorDetails(error.code, cn.edu.ubaa.auth.userFacingMessage(error.code))

@@ -80,7 +80,11 @@ object GlobalAcademicPortalWarmupCoordinator {
 
   val instance: AcademicPortalWarmupCoordinator
     get() {
-      current?.takeUnless { it.isClosed() }?.let { return it }
+      current
+          ?.takeUnless { it.isClosed() }
+          ?.let {
+            return it
+          }
       return synchronized(this) {
         current?.takeUnless { it.isClosed() }
             ?: AcademicPortalWarmupCoordinator().also { current = it }

@@ -26,7 +26,8 @@ fun Route.scheduleRouting() {
               is UnsupportedAcademicPortalException -> HttpStatusCode.NotImplemented
               else -> HttpStatusCode.BadGateway
             }
-        val code = if (e is UnsupportedAcademicPortalException) "unsupported_portal" else "schedule_error"
+        val code =
+            if (e is UnsupportedAcademicPortalException) "unsupported_portal" else "schedule_error"
         call.respondError(status, code)
       }
     }
@@ -47,7 +48,8 @@ fun Route.scheduleRouting() {
               is UnsupportedAcademicPortalException -> HttpStatusCode.NotImplemented
               else -> HttpStatusCode.BadGateway
             }
-        val code = if (e is UnsupportedAcademicPortalException) "unsupported_portal" else "schedule_error"
+        val code =
+            if (e is UnsupportedAcademicPortalException) "unsupported_portal" else "schedule_error"
         call.respondError(status, code)
       }
     }
@@ -71,7 +73,8 @@ fun Route.scheduleRouting() {
               is UnsupportedAcademicPortalException -> HttpStatusCode.NotImplemented
               else -> HttpStatusCode.BadGateway
             }
-        val code = if (e is UnsupportedAcademicPortalException) "unsupported_portal" else "schedule_error"
+        val code =
+            if (e is UnsupportedAcademicPortalException) "unsupported_portal" else "schedule_error"
         call.respondError(status, code)
       }
     }
@@ -89,7 +92,8 @@ fun Route.scheduleRouting() {
               is UnsupportedAcademicPortalException -> HttpStatusCode.NotImplemented
               else -> HttpStatusCode.BadGateway
             }
-        val code = if (e is UnsupportedAcademicPortalException) "unsupported_portal" else "schedule_error"
+        val code =
+            if (e is UnsupportedAcademicPortalException) "unsupported_portal" else "schedule_error"
         call.respondError(status, code)
       }
     }
