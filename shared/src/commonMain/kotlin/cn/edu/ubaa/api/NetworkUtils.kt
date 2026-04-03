@@ -97,7 +97,8 @@ internal fun userFacingMessageForStatus(status: HttpStatusCode): String {
   }
 }
 
-@PublishedApi internal suspend fun HttpResponse.userFacingErrorMessage(): String {
+@PublishedApi
+internal suspend fun HttpResponse.userFacingErrorMessage(): String {
   val error = runCatching { body<ApiErrorResponse>() }.getOrNull()
   return userFacingMessageForCode(error?.error?.code, status)
 }

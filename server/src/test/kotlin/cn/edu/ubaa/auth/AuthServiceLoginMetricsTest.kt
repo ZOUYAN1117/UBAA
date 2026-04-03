@@ -157,6 +157,35 @@ class AuthServiceLoginMetricsTest {
     assertTrue(authService.validateSession(session))
   }
 
+  @Test
+  fun manualLoginTokenIssuanceFailureDoesNotRecordMetrics() = runBlocking {
+    val sink = RecordingLoginMetricsSink()
+    val sessionManager = createSessionManager(::successfulManualLoginClient)
+    val refreshTokenService = RefreshTokenService(refreshTokenStore = FailingRefreshTokenStore())
+    val authService = AuthService(sessionManager, refreshTokenService, sink)
+
+    assertFailsWith<IllegalStateException> {
+      authService.login(LoginRequest(username = "2333", password = "secret"))
+    }
+
+    assertTrue(sink.records.isEmpty())
+  }
+
+  @Test
+  fun preloadAutoLoginTokenIssuanceFailureDoesNotRecordMetrics() = runBlocking {
+    val sink = RecordingLoginMetricsSink()
+    val sessionManager = createSessionManager(::successfulPreloadLoginClient)
+    val refreshTokenService = RefreshTokenService(refreshTokenStore = FailingRefreshTokenStore())
+    val authService = AuthService(sessionManager, refreshTokenService, sink)
+
+    val response = authService.preloadLoginState("device-1")
+
+    assertEquals("device-1", response.clientId)
+    assertEquals(null, response.accessToken)
+    assertEquals(null, response.refreshToken)
+    assertTrue(sink.records.isEmpty())
+  }
+
   private fun createAuthService(
       clientFactory: () -> HttpClient,
       sink: RecordingLoginMetricsSink,
@@ -328,4 +357,29 @@ private class RecordingLoginMetricsSink : LoginMetricsSink {
   override suspend fun recordSuccess(username: String, mode: LoginSuccessMode) {
     records += LoginRecord(username, mode)
   }
+}
+
+private class FailingRefreshTokenStore : RefreshTokenStore {
+  override suspend fun saveToken(
+      username: String,
+      token: String,
+      issuedAt: java.time.Instant,
+      expiresAt: java.time.Instant,
+  ) {
+    throw IllegalStateException("token store unavailable")
+  }
+
+  override suspend fun findToken(token: String): RefreshTokenRecord? = null
+
+  override suspend fun rotateToken(
+      username: String,
+      oldToken: String,
+      newToken: String,
+      issuedAt: java.time.Instant,
+      expiresAt: java.time.Instant,
+  ): Boolean = false
+
+  override suspend fun deleteByUsername(username: String) = Unit
+
+  override fun close() = Unit
 }

@@ -23,7 +23,8 @@ fun Route.evaluationRouting() {
     /** GET /api/v1/evaluation/list 获取所有评教课程列表（包括已评教和未评教），附带进度信息。 需要 JWT 认证。 */
     get("/list") {
       val username =
-          call.jwtUsername ?: return@get call.respondError(HttpStatusCode.Unauthorized, "invalid_token")
+          call.jwtUsername
+              ?: return@get call.respondError(HttpStatusCode.Unauthorized, "invalid_token")
       try {
         val response = evaluationService.getAllCourses(username)
         call.respond(HttpStatusCode.OK, response)
@@ -38,7 +39,8 @@ fun Route.evaluationRouting() {
     /** POST /api/v1/evaluation/submit 提交评教任务。 接收 EvaluationCourse 列表，执行自动评教并返回结果。 需要 JWT 认证。 */
     post("/submit") {
       val username =
-          call.jwtUsername ?: return@post call.respondError(HttpStatusCode.Unauthorized, "invalid_token")
+          call.jwtUsername
+              ?: return@post call.respondError(HttpStatusCode.Unauthorized, "invalid_token")
       try {
         val coursesToEvaluate = call.receive<List<EvaluationCourse>>()
         if (coursesToEvaluate.isEmpty()) {

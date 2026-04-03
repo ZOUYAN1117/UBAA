@@ -4,9 +4,9 @@ import cn.edu.ubaa.auth.GlobalAcademicPortalWarmupCoordinator
 import cn.edu.ubaa.auth.GlobalRefreshTokenService
 import cn.edu.ubaa.auth.GlobalSessionManager
 import cn.edu.ubaa.auth.JwtAuth
-import cn.edu.ubaa.auth.configureGlobalErrorHandling
 import cn.edu.ubaa.auth.JwtAuth.configureJwtAuth
 import cn.edu.ubaa.auth.authRouting
+import cn.edu.ubaa.auth.configureGlobalErrorHandling
 import cn.edu.ubaa.bykc.GlobalBykcService
 import cn.edu.ubaa.bykc.bykcRouting
 import cn.edu.ubaa.cgyy.GlobalCgyyService
@@ -161,7 +161,7 @@ internal fun Application.module(
     ygdkService.clearCache()
     GlobalAcademicPortalWarmupCoordinator.close()
     sessionManager.close()
-    appVersionService.close()
+    GlobalAppVersionService.release(appVersionService)
     GlobalRefreshTokenService.instance.close()
     loginMetricsRecorder.close()
   }

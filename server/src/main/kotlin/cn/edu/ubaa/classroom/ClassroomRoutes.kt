@@ -18,7 +18,8 @@ fun Route.classroomRouting() {
      */
     get("/query") {
       val username =
-          call.jwtUsername ?: return@get call.respondError(HttpStatusCode.Unauthorized, "invalid_token")
+          call.jwtUsername
+              ?: return@get call.respondError(HttpStatusCode.Unauthorized, "invalid_token")
       val xqid = call.parameters["xqid"]?.toIntOrNull() ?: 1
       val date = call.parameters["date"] ?: ""
 

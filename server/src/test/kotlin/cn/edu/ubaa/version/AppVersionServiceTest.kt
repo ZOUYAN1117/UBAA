@@ -12,6 +12,7 @@ import io.ktor.utils.io.ByteReadChannel
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertNotSame
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import kotlinx.coroutines.test.runTest
@@ -143,5 +144,18 @@ class AppVersionServiceTest {
         )
 
     assertNull(fetcher.fetchReleaseNotes("1.5.0"))
+  }
+
+  @Test
+  fun globalAppVersionServiceRecreatesClosedInstance() {
+    GlobalAppVersionService.close()
+
+    val first = GlobalAppVersionService.instance
+
+    GlobalAppVersionService.close()
+    val second = GlobalAppVersionService.instance
+
+    assertNotSame(first, second)
+    GlobalAppVersionService.close()
   }
 }

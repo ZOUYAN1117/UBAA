@@ -213,11 +213,11 @@ class AuthService(
               sessionManager.commitSession(activeCandidate, userData)
             }
         committed = true
-        safeRecordLoginSuccess(activeCandidate.username, LoginSuccessMode.MANUAL)
         val response =
             timeline.measure("issueTokens") {
               refreshTokenService.issueLoginTokens(userData, activeCandidate.username)
             }
+        safeRecordLoginSuccess(activeCandidate.username, LoginSuccessMode.MANUAL)
         timeline.measure("portalWarmupAsync") { maybeWarmupPortal(committedSession) }
         timeline.logSuccess("manual")
         return response
@@ -287,8 +287,8 @@ class AuthService(
                 sessionManager.promotePreLoginSession(clientId, userData.schoolid)
             if (sessionCandidate != null) {
               val committedSession = sessionManager.commitSession(sessionCandidate, userData)
-              safeRecordLoginSuccess(sessionCandidate.username, LoginSuccessMode.PRELOAD_AUTO)
               val tokenResponse = refreshTokenService.issueTokens(sessionCandidate.username)
+              safeRecordLoginSuccess(sessionCandidate.username, LoginSuccessMode.PRELOAD_AUTO)
               maybeWarmupPortal(committedSession)
               return@withNoRedirectClient LoginPreloadResponse(
                   captchaRequired = false,

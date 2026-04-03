@@ -93,7 +93,8 @@ class AuthService(private val apiClient: ApiClient = ApiClientProvider.shared) {
           apiClient.updateTokens(loginResponse.toStoredAuthTokens())
           Result.success(loginResponse)
         }
-        HttpStatusCode.Unauthorized -> Result.failure(UserFacingApiException(response.userFacingErrorMessage()))
+        HttpStatusCode.Unauthorized ->
+            Result.failure(UserFacingApiException(response.userFacingErrorMessage()))
         HttpStatusCode.UnprocessableEntity -> { // 422 - 需要验证码
           val captchaResponse = response.body<CaptchaRequiredResponse>()
           Result.failure(

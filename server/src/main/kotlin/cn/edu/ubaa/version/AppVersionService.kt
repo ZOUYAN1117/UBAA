@@ -111,6 +111,7 @@ class AppVersionService(
     private val config: AppVersionRuntimeConfig = AppVersionRuntimeConfig.load(),
     private val releaseNotesFetcher: ReleaseNotesFetcher = ProxyReleaseNotesFetcher(),
 ) {
+  @Volatile private var closed = false
   private val releaseNotesCacheMutex = Mutex()
   private var cachedReleaseNotesVersion: String? = null
   private var cachedReleaseNotes: String? = null
@@ -129,8 +130,12 @@ class AppVersionService(
   }
 
   fun close() {
+    if (closed) return
+    closed = true
     releaseNotesFetcher.close()
   }
+
+  internal fun isClosed(): Boolean = closed
 
   private suspend fun loadReleaseNotes(serverVersion: String): String? {
     val normalizedVersion = normalizeVersion(serverVersion)
@@ -153,5 +158,35 @@ class AppVersionService(
 }
 
 object GlobalAppVersionService {
-  val instance: AppVersionService by lazy { AppVersionService() }
+  @Volatile private var current: AppVersionService? = null
+
+  val instance: AppVersionService
+    get() {
+      current
+          ?.takeUnless { it.isClosed() }
+          ?.let {
+            return it
+          }
+      return synchronized(this) {
+        current?.takeUnless { it.isClosed() } ?: AppVersionService().also { current = it }
+      }
+    }
+
+  fun close() {
+    synchronized(this) {
+      current?.close()
+      current = null
+    }
+  }
+
+  fun release(service: AppVersionService) {
+    synchronized(this) {
+      if (current === service) {
+        current?.close()
+        current = null
+      } else {
+        service.close()
+      }
+    }
+  }
 }

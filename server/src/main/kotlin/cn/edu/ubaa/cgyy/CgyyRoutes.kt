@@ -1,7 +1,5 @@
 package cn.edu.ubaa.cgyy
 
-import cn.edu.ubaa.auth.ErrorDetails
-import cn.edu.ubaa.auth.ErrorResponse
 import cn.edu.ubaa.auth.JwtAuth.jwtUsername
 import cn.edu.ubaa.auth.respondError
 import cn.edu.ubaa.model.dto.CgyyReservationSubmitRequest

@@ -1,7 +1,7 @@
 package cn.edu.ubaa.signin
 
-import cn.edu.ubaa.auth.respondError
 import cn.edu.ubaa.auth.JwtAuth.requireUserSession
+import cn.edu.ubaa.auth.respondError
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.application.*
 import io.ktor.server.response.*

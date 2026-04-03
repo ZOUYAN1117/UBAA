@@ -20,13 +20,7 @@ fun Route.scheduleRouting() {
         val terms = scheduleService.fetchTerms(username)
         call.respond(HttpStatusCode.OK, terms)
       } catch (e: Exception) {
-        val status =
-            when (e) {
-              is LoginException -> HttpStatusCode.Unauthorized
-              is UnsupportedAcademicPortalException -> HttpStatusCode.NotImplemented
-              else -> HttpStatusCode.BadGateway
-            }
-        val code = if (e is UnsupportedAcademicPortalException) "unsupported_portal" else "schedule_error"
+        val (status, code) = scheduleErrorResponse(e)
         call.respondError(status, code)
       }
     }
@@ -41,13 +35,7 @@ fun Route.scheduleRouting() {
         val weeks = scheduleService.fetchWeeks(username, termCode)
         call.respond(HttpStatusCode.OK, weeks)
       } catch (e: Exception) {
-        val status =
-            when (e) {
-              is LoginException -> HttpStatusCode.Unauthorized
-              is UnsupportedAcademicPortalException -> HttpStatusCode.NotImplemented
-              else -> HttpStatusCode.BadGateway
-            }
-        val code = if (e is UnsupportedAcademicPortalException) "unsupported_portal" else "schedule_error"
+        val (status, code) = scheduleErrorResponse(e)
         call.respondError(status, code)
       }
     }
@@ -65,13 +53,7 @@ fun Route.scheduleRouting() {
         val schedule = scheduleService.fetchWeeklySchedule(username, termCode, week)
         call.respond(HttpStatusCode.OK, schedule)
       } catch (e: Exception) {
-        val status =
-            when (e) {
-              is LoginException -> HttpStatusCode.Unauthorized
-              is UnsupportedAcademicPortalException -> HttpStatusCode.NotImplemented
-              else -> HttpStatusCode.BadGateway
-            }
-        val code = if (e is UnsupportedAcademicPortalException) "unsupported_portal" else "schedule_error"
+        val (status, code) = scheduleErrorResponse(e)
         call.respondError(status, code)
       }
     }
@@ -83,15 +65,17 @@ fun Route.scheduleRouting() {
         val todaySchedule = scheduleService.fetchTodaySchedule(username)
         call.respond(HttpStatusCode.OK, todaySchedule)
       } catch (e: Exception) {
-        val status =
-            when (e) {
-              is LoginException -> HttpStatusCode.Unauthorized
-              is UnsupportedAcademicPortalException -> HttpStatusCode.NotImplemented
-              else -> HttpStatusCode.BadGateway
-            }
-        val code = if (e is UnsupportedAcademicPortalException) "unsupported_portal" else "schedule_error"
+        val (status, code) = scheduleErrorResponse(e)
         call.respondError(status, code)
       }
     }
+  }
+}
+
+internal fun scheduleErrorResponse(error: Exception): Pair<HttpStatusCode, String> {
+  return when (error) {
+    is LoginException -> HttpStatusCode.Unauthorized to "invalid_token"
+    is UnsupportedAcademicPortalException -> HttpStatusCode.NotImplemented to "unsupported_portal"
+    else -> HttpStatusCode.BadGateway to "schedule_error"
   }
 }

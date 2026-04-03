@@ -31,15 +31,17 @@ fun Route.examRouting() {
         val examData = examService.getExamArrangement(username, termCode)
         call.respond(HttpStatusCode.OK, examData)
       } catch (e: Exception) {
-        val status =
-            when (e) {
-              is LoginException -> HttpStatusCode.Unauthorized
-              is UnsupportedAcademicPortalException -> HttpStatusCode.NotImplemented
-              else -> HttpStatusCode.BadGateway
-            }
-        val code = if (e is UnsupportedAcademicPortalException) "unsupported_portal" else "exam_error"
+        val (status, code) = examErrorResponse(e)
         call.respondError(status, code)
       }
     }
+  }
+}
+
+internal fun examErrorResponse(error: Exception): Pair<HttpStatusCode, String> {
+  return when (error) {
+    is LoginException -> HttpStatusCode.Unauthorized to "invalid_token"
+    is UnsupportedAcademicPortalException -> HttpStatusCode.NotImplemented to "unsupported_portal"
+    else -> HttpStatusCode.BadGateway to "exam_error"
   }
 }
