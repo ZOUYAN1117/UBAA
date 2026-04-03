@@ -6,13 +6,15 @@ internal suspend fun ensureUndergradPortalAccess(
     session: SessionManager.UserSession,
     graduateUnsupportedMessage: String,
     unavailableExceptionFactory: () -> Exception,
+    warmupCoordinator: AcademicPortalWarmupCoordinator =
+        GlobalAcademicPortalWarmupCoordinator.instance,
 ) {
   when (session.portalType) {
     AcademicPortalType.UNDERGRAD -> return
     AcademicPortalType.GRADUATE ->
         throw UnsupportedAcademicPortalException(graduateUnsupportedMessage)
     AcademicPortalType.UNKNOWN -> {
-      when (val result = ByxtService.initializeSession(session.client)) {
+      when (val result = warmupCoordinator.awaitOrStart(username, session.client)) {
         AcademicPortalProbeResult.UNDERGRAD_READY -> {
           sessionManager.updateSessionPortalType(username, AcademicPortalType.UNDERGRAD)
           return

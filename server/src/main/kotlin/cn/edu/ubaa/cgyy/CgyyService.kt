@@ -11,7 +11,9 @@ import cn.edu.ubaa.model.dto.CgyySlotStatusDto
 import cn.edu.ubaa.model.dto.CgyySpaceAvailabilityDto
 import cn.edu.ubaa.model.dto.CgyyTimeSlotDto
 import cn.edu.ubaa.model.dto.CgyyVenueSiteDto
+import cn.edu.ubaa.utils.withUpstreamDeadline
 import java.util.concurrent.ConcurrentHashMap
+import kotlin.time.Duration.Companion.seconds
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
@@ -36,130 +38,144 @@ class CgyyService(
   private val clientCache = ConcurrentHashMap<String, CachedClient>()
 
   suspend fun getVenueSites(username: String): List<CgyyVenueSiteDto> {
-    return getClient(username).getVenueSites().map { mapVenueSite(it.jsonObject) }
+    return withCgyyDeadline("研讨室场地列表加载超时") {
+      getClient(username).getVenueSites().map { mapVenueSite(it.jsonObject) }
+    }
   }
 
   suspend fun getPurposeTypes(username: String): List<CgyyPurposeTypeDto> {
-    val dynamic =
-        runCatching { parsePurposeTypes(getClient(username).getPurposeTypesRaw()) }.getOrNull()
-    return if (!dynamic.isNullOrEmpty()) dynamic else fallbackPurposeTypes()
+    return withCgyyDeadline("研讨室活动类型加载超时") {
+      val dynamic =
+          runCatching { parsePurposeTypes(getClient(username).getPurposeTypesRaw()) }.getOrNull()
+      if (!dynamic.isNullOrEmpty()) dynamic else fallbackPurposeTypes()
+    }
   }
 
   suspend fun getDayInfo(username: String, venueSiteId: Int, date: String): CgyyDayInfoResponse {
-    return mapDayInfo(
-        venueSiteId = venueSiteId,
-        reservationDate = date,
-        raw = getClient(username).getReservationDayInfo(date, venueSiteId),
-    )
+    return withCgyyDeadline("研讨室可预约信息加载超时") {
+      mapDayInfo(
+          venueSiteId = venueSiteId,
+          reservationDate = date,
+          raw = getClient(username).getReservationDayInfo(date, venueSiteId),
+      )
+    }
   }
 
   suspend fun submitReservation(
       username: String,
       request: CgyyReservationSubmitRequest,
   ): CgyyReservationSubmitResponse {
-    validateRequest(request)
+    return withCgyyDeadline("研讨室预约提交超时", 10.seconds) {
+      validateRequest(request)
 
-    val client = getClient(username)
-    val dayInfo = getDayInfo(username, request.venueSiteId, request.reservationDate)
-    val reservationToken =
-        dayInfo.reservationToken
-            ?: throw CgyyException("预约上下文 token 缺失，请刷新后重试", "reservation_token_missing")
+      val client = getClient(username)
+      val dayInfo = getDayInfo(username, request.venueSiteId, request.reservationDate)
+      val reservationToken =
+          dayInfo.reservationToken
+              ?: throw CgyyException("预约上下文 token 缺失，请刷新后重试", "reservation_token_missing")
 
-    val selectedSpaceId = request.selections.first().spaceId
-    val selectedSpace =
-        dayInfo.spaces.firstOrNull { it.spaceId == selectedSpaceId }
-            ?: throw CgyyException("所选房间不存在或已失效", "reservation_invalid")
-    if (request.selections.any { it.spaceId != selectedSpaceId }) {
-      throw CgyyException("同次预约只能选择同一房间的时段", "reservation_invalid")
-    }
-
-    request.selections.forEach { selection ->
-      val slot =
-          selectedSpace.slots.firstOrNull { it.timeId == selection.timeId }
-              ?: throw CgyyException("所选时段不存在或已失效", "reservation_invalid")
-      if (!slot.isReservable) {
-        throw CgyyException("所选时段已不可预约，请刷新后重试", "reservation_invalid")
+      val selectedSpaceId = request.selections.first().spaceId
+      val selectedSpace =
+          dayInfo.spaces.firstOrNull { it.spaceId == selectedSpaceId }
+              ?: throw CgyyException("所选房间不存在或已失效", "reservation_invalid")
+      if (request.selections.any { it.spaceId != selectedSpaceId }) {
+        throw CgyyException("同次预约只能选择同一房间的时段", "reservation_invalid")
       }
-    }
 
-    val reservationOrderJson = json.encodeToString(request.selections)
-    client.createReservationOrder(
-        venueSiteId = request.venueSiteId,
-        reservationDate = request.reservationDate,
-        weekStartDate = request.reservationDate,
-        reservationOrderJson = reservationOrderJson,
-        token = reservationToken,
-    )
-
-    var lastCaptchaError: Exception? = null
-    repeat(3) {
-      try {
-        val challenge = client.getCaptcha()
-        val solved = captchaSolver.solve(challenge)
-        client.verifyCaptcha(solved.pointJson, challenge.token)
-        val submitResponse =
-            client.submitReservationOrder(
-                venueSiteId = request.venueSiteId,
-                reservationDate = request.reservationDate,
-                reservationOrderJson = reservationOrderJson,
-                weekStartDate = request.reservationDate,
-                phone = request.phone.trim(),
-                theme = request.theme.trim(),
-                purposeType = request.purposeType,
-                joinerNum = request.joinerNum,
-                activityContent = request.activityContent.trim(),
-                joiners = request.joiners.trim(),
-                captchaVerification = solved.captchaVerification,
-                token = reservationToken,
-                isPhilosophySocialSciences = if (request.isPhilosophySocialSciences) 1 else 0,
-                isOffSchoolJoiner = if (request.isOffSchoolJoiner) 1 else 0,
-            )
-        val order =
-            submitResponse.data?.jsonObject?.get("orderInfo")?.jsonObject?.let { mapOrder(it) }
-        return CgyyReservationSubmitResponse(
-            success = true,
-            message = submitResponse.message.ifBlank { "预约成功" },
-            order = order,
-        )
-      } catch (e: Exception) {
-        lastCaptchaError = e
+      request.selections.forEach { selection ->
+        val slot =
+            selectedSpace.slots.firstOrNull { it.timeId == selection.timeId }
+                ?: throw CgyyException("所选时段不存在或已失效", "reservation_invalid")
+        if (!slot.isReservable) {
+          throw CgyyException("所选时段已不可预约，请刷新后重试", "reservation_invalid")
+        }
       }
-    }
 
-    throw CgyyException(
-        lastCaptchaError?.message ?: "验证码识别失败，请稍后重试",
-        "captcha_error",
-    )
-  }
+      val reservationOrderJson = json.encodeToString(request.selections)
+      client.createReservationOrder(
+          venueSiteId = request.venueSiteId,
+          reservationDate = request.reservationDate,
+          weekStartDate = request.reservationDate,
+          reservationOrderJson = reservationOrderJson,
+          token = reservationToken,
+      )
 
-  suspend fun getOrders(username: String, page: Int, size: Int): CgyyOrdersPageResponse {
-    return withFreshClientRetry(username) { client ->
-      val data = client.getMineOrders(page, size)
-      CgyyOrdersPageResponse(
-          content = data["content"]?.jsonArray?.map { mapOrder(it.jsonObject) } ?: emptyList(),
-          totalElements = data["totalElements"]?.jsonPrimitive?.intOrNull ?: 0,
-          totalPages = data["totalPages"]?.jsonPrimitive?.intOrNull ?: 0,
-          size = data["size"]?.jsonPrimitive?.intOrNull ?: size,
-          number = data["number"]?.jsonPrimitive?.intOrNull ?: page,
+      var lastCaptchaError: Exception? = null
+      repeat(3) {
+        try {
+          val challenge = client.getCaptcha()
+          val solved = captchaSolver.solve(challenge)
+          client.verifyCaptcha(solved.pointJson, challenge.token)
+          val submitResponse =
+              client.submitReservationOrder(
+                  venueSiteId = request.venueSiteId,
+                  reservationDate = request.reservationDate,
+                  reservationOrderJson = reservationOrderJson,
+                  weekStartDate = request.reservationDate,
+                  phone = request.phone.trim(),
+                  theme = request.theme.trim(),
+                  purposeType = request.purposeType,
+                  joinerNum = request.joinerNum,
+                  activityContent = request.activityContent.trim(),
+                  joiners = request.joiners.trim(),
+                  captchaVerification = solved.captchaVerification,
+                  token = reservationToken,
+                  isPhilosophySocialSciences = if (request.isPhilosophySocialSciences) 1 else 0,
+                  isOffSchoolJoiner = if (request.isOffSchoolJoiner) 1 else 0,
+              )
+          val order =
+              submitResponse.data?.jsonObject?.get("orderInfo")?.jsonObject?.let { mapOrder(it) }
+          return@withCgyyDeadline CgyyReservationSubmitResponse(
+              success = true,
+              message = submitResponse.message.ifBlank { "预约成功" },
+              order = order,
+          )
+        } catch (e: Exception) {
+          lastCaptchaError = e
+        }
+      }
+
+      throw CgyyException(
+          lastCaptchaError?.message ?: "验证码识别失败，请稍后重试",
+          "captcha_error",
       )
     }
   }
 
+  suspend fun getOrders(username: String, page: Int, size: Int): CgyyOrdersPageResponse {
+    return withCgyyDeadline("研讨室预约列表加载超时") {
+      withFreshClientRetry(username) { client ->
+        val data = client.getMineOrders(page, size)
+        CgyyOrdersPageResponse(
+            content = data["content"]?.jsonArray?.map { mapOrder(it.jsonObject) } ?: emptyList(),
+            totalElements = data["totalElements"]?.jsonPrimitive?.intOrNull ?: 0,
+            totalPages = data["totalPages"]?.jsonPrimitive?.intOrNull ?: 0,
+            size = data["size"]?.jsonPrimitive?.intOrNull ?: size,
+            number = data["number"]?.jsonPrimitive?.intOrNull ?: page,
+        )
+      }
+    }
+  }
+
   suspend fun getOrderDetail(username: String, orderId: Int): CgyyOrderDto {
-    return mapOrder(getClient(username).getOrderDetail(orderId))
+    return withCgyyDeadline("研讨室预约详情加载超时") { mapOrder(getClient(username).getOrderDetail(orderId)) }
   }
 
   suspend fun cancelOrder(username: String, orderId: Int): CgyyReservationSubmitResponse {
-    val response = getClient(username).cancelOrder(orderId)
-    return CgyyReservationSubmitResponse(
-        success = true,
-        message = response.message.ifBlank { "取消成功" },
-        order = null,
-    )
+    return withCgyyDeadline("研讨室预约取消超时") {
+      val response = getClient(username).cancelOrder(orderId)
+      CgyyReservationSubmitResponse(
+          success = true,
+          message = response.message.ifBlank { "取消成功" },
+          order = null,
+      )
+    }
   }
 
   suspend fun getLockCode(username: String): CgyyLockCodeResponse {
-    return CgyyLockCodeResponse(rawData = getClient(username).getLockCode())
+    return withCgyyDeadline("研讨室门锁密码加载超时") {
+      CgyyLockCodeResponse(rawData = getClient(username).getLockCode())
+    }
   }
 
   fun cleanupExpiredClients(maxIdleMillis: Long = DEFAULT_MAX_IDLE_MILLIS): Int {
@@ -397,6 +413,14 @@ class CgyyService(
 
   companion object {
     private const val DEFAULT_MAX_IDLE_MILLIS = 30 * 60 * 1000L
+  }
+
+  private suspend fun <T> withCgyyDeadline(
+      message: String,
+      timeout: kotlin.time.Duration = 9.seconds,
+      block: suspend () -> T,
+  ): T {
+    return withUpstreamDeadline(timeout, message, "cgyy_timeout", block)
   }
 }
 

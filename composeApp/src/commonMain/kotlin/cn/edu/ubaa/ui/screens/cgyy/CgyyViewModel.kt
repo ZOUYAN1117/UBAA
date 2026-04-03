@@ -76,14 +76,19 @@ class CgyyViewModel(
     const val ALL_CAMPUSES = "全部"
   }
 
+  private var initialLoadedOnce = false
+  private var ordersLoadedOnce = false
+  private var lockCodeLoadedOnce = false
   private val _uiState = MutableStateFlow(createInitialState())
   val uiState: StateFlow<CgyyUiState> = _uiState.asStateFlow()
 
-  init {
+  fun ensureInitialDataLoaded(forceRefresh: Boolean = false) {
+    if (!forceRefresh && initialLoadedOnce) return
     loadInitialData()
   }
 
   fun loadInitialData() {
+    initialLoadedOnce = true
     viewModelScope.launch {
       _uiState.value =
           _uiState.value.copy(
@@ -125,10 +130,14 @@ class CgyyViewModel(
     }
   }
 
-  fun ensureOrdersLoaded() {
-    if (_uiState.value.orders.content.isEmpty() && !_uiState.value.isOrdersLoading) {
-      loadOrders()
-    }
+  fun ensureOrdersLoaded(forceRefresh: Boolean = false) {
+    if (!forceRefresh && ordersLoadedOnce) return
+    loadOrders()
+  }
+
+  fun ensureLockCodeLoaded(forceRefresh: Boolean = false) {
+    if (!forceRefresh && lockCodeLoadedOnce) return
+    loadLockCode()
   }
 
   fun setDefaultPhone(phone: String?) {
@@ -338,6 +347,7 @@ class CgyyViewModel(
   }
 
   fun loadOrders(page: Int = 0, size: Int = 20) {
+    ordersLoadedOnce = true
     viewModelScope.launch {
       _uiState.value = _uiState.value.copy(isOrdersLoading = true, ordersError = null)
       cgyyApi
@@ -376,6 +386,7 @@ class CgyyViewModel(
   }
 
   fun loadLockCode() {
+    lockCodeLoadedOnce = true
     viewModelScope.launch {
       _uiState.value = _uiState.value.copy(isLockCodeLoading = true, lockCodeError = null)
       cgyyApi

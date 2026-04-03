@@ -41,14 +41,17 @@ data class YgdkUiState(
 class YgdkViewModel(
     private val ygdkApi: YgdkApi = YgdkApi(),
 ) : ViewModel() {
+  private var loadedOnce = false
   private val _uiState = MutableStateFlow(YgdkUiState())
   val uiState: StateFlow<YgdkUiState> = _uiState.asStateFlow()
 
-  init {
+  fun ensureLoaded(forceRefresh: Boolean = false) {
+    if (!forceRefresh && loadedOnce) return
     refreshAll()
   }
 
   fun refreshAll() {
+    loadedOnce = true
     viewModelScope.launch {
       val current = _uiState.value
       _uiState.value = current.copy(isLoading = true, loadError = null)

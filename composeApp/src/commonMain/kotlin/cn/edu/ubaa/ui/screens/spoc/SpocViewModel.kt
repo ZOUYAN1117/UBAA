@@ -46,18 +46,22 @@ class SpocViewModel(
       Clock.System.now().toLocalDateTime(TimeZone.currentSystemDefault())
     },
 ) : ViewModel() {
+  private var assignmentsLoadedOnce = false
   private val _uiState = MutableStateFlow(SpocUiState())
   val uiState: StateFlow<SpocUiState> = _uiState.asStateFlow()
 
-  init {
-    loadAssignments()
+  fun ensureAssignmentsLoaded(forceRefresh: Boolean = false) {
+    if (!forceRefresh && assignmentsLoadedOnce) return
+    loadAssignments(refresh = forceRefresh)
   }
 
   fun loadAssignments(refresh: Boolean = false) {
+    assignmentsLoadedOnce = true
     viewModelScope.launch {
+      val hasExistingData = _uiState.value.assignmentsResponse != null
       _uiState.value =
           _uiState.value.copy(
-              isLoading = !refresh,
+              isLoading = !refresh || !hasExistingData,
               isRefreshing = refresh,
               error = null,
           )

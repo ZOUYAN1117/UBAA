@@ -1,10 +1,9 @@
 package cn.edu.ubaa.exam
 
-import cn.edu.ubaa.auth.ErrorDetails
-import cn.edu.ubaa.auth.ErrorResponse
 import cn.edu.ubaa.auth.JwtAuth.jwtUsername
 import cn.edu.ubaa.auth.LoginException
 import cn.edu.ubaa.auth.UnsupportedAcademicPortalException
+import cn.edu.ubaa.auth.respondError
 import io.ktor.http.*
 import io.ktor.server.application.*
 import io.ktor.server.response.*
@@ -25,25 +24,24 @@ fun Route.examRouting() {
       val termCode = call.request.queryParameters["termCode"]
 
       if (termCode.isNullOrBlank()) {
-        return@get call.respond(
-            HttpStatusCode.BadRequest,
-            ErrorResponse(ErrorDetails("invalid_request", "termCode is required")),
-        )
+        return@get call.respondError(HttpStatusCode.BadRequest, "invalid_request")
       }
 
       try {
         val examData = examService.getExamArrangement(username, termCode)
         call.respond(HttpStatusCode.OK, examData)
       } catch (e: Exception) {
-        val status =
-            when (e) {
-              is LoginException -> HttpStatusCode.Unauthorized
-              is UnsupportedAcademicPortalException -> HttpStatusCode.NotImplemented
-              else -> HttpStatusCode.BadGateway
-            }
-        val code = if (e is UnsupportedAcademicPortalException) "unsupported_portal" else "error"
-        call.respond(status, ErrorResponse(ErrorDetails(code, e.message ?: "Error")))
+        val (status, code) = examErrorResponse(e)
+        call.respondError(status, code)
       }
     }
+  }
+}
+
+internal fun examErrorResponse(error: Exception): Pair<HttpStatusCode, String> {
+  return when (error) {
+    is LoginException -> HttpStatusCode.Unauthorized to "invalid_token"
+    is UnsupportedAcademicPortalException -> HttpStatusCode.NotImplemented to "unsupported_portal"
+    else -> HttpStatusCode.BadGateway to "exam_error"
   }
 }

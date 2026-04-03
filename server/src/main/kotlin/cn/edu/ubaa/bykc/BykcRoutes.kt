@@ -4,12 +4,15 @@ import cn.edu.ubaa.auth.ErrorDetails
 import cn.edu.ubaa.auth.ErrorResponse
 import cn.edu.ubaa.auth.JwtAuth.jwtUsername
 import cn.edu.ubaa.auth.LoginException
+import cn.edu.ubaa.auth.respondError
 import cn.edu.ubaa.model.dto.BykcCoursesResponse
 import cn.edu.ubaa.model.dto.BykcSignRequest
 import cn.edu.ubaa.model.dto.BykcSuccessResponse
 import cn.edu.ubaa.model.dto.BykcUserProfileDto
+import cn.edu.ubaa.utils.UpstreamTimeoutException
 import io.ktor.http.*
 import io.ktor.server.application.*
+import io.ktor.server.application.ApplicationCall
 import io.ktor.server.request.*
 import io.ktor.server.response.*
 import io.ktor.server.routing.*
@@ -40,24 +43,13 @@ fun Route.bykcRouting() {
             )
         call.respond(HttpStatusCode.OK, profileDto)
       } catch (e: LoginException) {
-        call.respond(
-            HttpStatusCode.Unauthorized,
-            ErrorResponse(
-                ErrorDetails("unauthenticated", e.message ?: "Session is not available.")
-            ),
-        )
+        call.respondBykcError(e)
+      } catch (e: UpstreamTimeoutException) {
+        call.respondBykcError(e)
       } catch (e: BykcException) {
-        call.respond(
-            HttpStatusCode.BadGateway,
-            ErrorResponse(ErrorDetails("bykc_error", e.message ?: "Failed to fetch BYKC profile.")),
-        )
+        call.respondBykcError(e)
       } catch (e: Exception) {
-        call.respond(
-            HttpStatusCode.InternalServerError,
-            ErrorResponse(
-                ErrorDetails("internal_server_error", "An unexpected server error occurred.")
-            ),
-        )
+        call.respondBykcError(e)
       }
     }
 
@@ -75,10 +67,7 @@ fun Route.bykcRouting() {
       val includeAll = call.request.queryParameters["all"]?.toBoolean() ?: false
 
       if (page < 1 || size < 1 || size > 500) {
-        call.respond(
-            HttpStatusCode.BadRequest,
-            ErrorResponse(ErrorDetails("invalid_request", "Invalid page or size")),
-        )
+        call.respondError(HttpStatusCode.BadRequest, "invalid_request")
         return@get
       }
 
@@ -96,11 +85,14 @@ fun Route.bykcRouting() {
                 pageSize = coursePage.pageSize,
             ),
         )
+      } catch (e: LoginException) {
+        call.respondBykcError(e)
+      } catch (e: UpstreamTimeoutException) {
+        call.respondBykcError(e)
+      } catch (e: BykcException) {
+        call.respondBykcError(e)
       } catch (e: Exception) {
-        call.respond(
-            HttpStatusCode.InternalServerError,
-            ErrorResponse(ErrorDetails("internal_server_error", e.message ?: "Error")),
-        )
+        call.respondBykcError(e)
       }
     }
 
@@ -110,11 +102,14 @@ fun Route.bykcRouting() {
       try {
         val statistics = bykcService.getStatistics(username)
         call.respond(HttpStatusCode.OK, statistics)
+      } catch (e: LoginException) {
+        call.respondBykcError(e)
+      } catch (e: UpstreamTimeoutException) {
+        call.respondBykcError(e)
+      } catch (e: BykcException) {
+        call.respondBykcError(e)
       } catch (e: Exception) {
-        call.respond(
-            HttpStatusCode.InternalServerError,
-            ErrorResponse(ErrorDetails("internal_server_error", "Error")),
-        )
+        call.respondBykcError(e)
       }
     }
 
@@ -123,7 +118,7 @@ fun Route.bykcRouting() {
       val username = call.jwtUsername!!
       val courseId =
           call.parameters["courseId"]?.toLongOrNull()
-              ?: return@post call.respond(HttpStatusCode.BadRequest)
+              ?: return@post call.respondError(HttpStatusCode.BadRequest, "invalid_request")
 
       try {
         bykcService
@@ -140,15 +135,14 @@ fun Route.bykcRouting() {
                       }
                   call.respond(
                       HttpStatusCode.Conflict,
-                      ErrorResponse(ErrorDetails(code, error.message ?: "Failed")),
+                      ErrorResponse(ErrorDetails(code, cn.edu.ubaa.auth.userFacingMessage(code))),
                   )
                 },
             )
+      } catch (e: UpstreamTimeoutException) {
+        call.respondBykcError(e)
       } catch (e: Exception) {
-        call.respond(
-            HttpStatusCode.InternalServerError,
-            ErrorResponse(ErrorDetails("internal_error", "Error")),
-        )
+        call.respondBykcError(e)
       }
     }
 
@@ -157,7 +151,7 @@ fun Route.bykcRouting() {
       val username = call.jwtUsername!!
       val courseId =
           call.parameters["courseId"]?.toLongOrNull()
-              ?: return@delete call.respond(HttpStatusCode.BadRequest)
+              ?: return@delete call.respondError(HttpStatusCode.BadRequest, "invalid_request")
 
       try {
         bykcService
@@ -167,15 +161,19 @@ fun Route.bykcRouting() {
                 onFailure = {
                   call.respond(
                       HttpStatusCode.BadRequest,
-                      ErrorResponse(ErrorDetails("deselect_failed", it.message ?: "Failed")),
+                      ErrorResponse(
+                          ErrorDetails(
+                              "deselect_failed",
+                              cn.edu.ubaa.auth.userFacingMessage("deselect_failed"),
+                          )
+                      ),
                   )
                 },
             )
+      } catch (e: UpstreamTimeoutException) {
+        call.respondBykcError(e)
       } catch (e: Exception) {
-        call.respond(
-            HttpStatusCode.InternalServerError,
-            ErrorResponse(ErrorDetails("internal_error", "Error")),
-        )
+        call.respondBykcError(e)
       }
     }
 
@@ -185,11 +183,14 @@ fun Route.bykcRouting() {
       try {
         val chosenCourses = bykcService.getChosenCourses(username)
         call.respond(HttpStatusCode.OK, chosenCourses)
+      } catch (e: LoginException) {
+        call.respondBykcError(e)
+      } catch (e: UpstreamTimeoutException) {
+        call.respondBykcError(e)
+      } catch (e: BykcException) {
+        call.respondBykcError(e)
       } catch (e: Exception) {
-        call.respond(
-            HttpStatusCode.InternalServerError,
-            ErrorResponse(ErrorDetails("internal_error", "Error")),
-        )
+        call.respondBykcError(e)
       }
     }
 
@@ -198,15 +199,18 @@ fun Route.bykcRouting() {
       val username = call.jwtUsername!!
       val courseId =
           call.parameters["courseId"]?.toLongOrNull()
-              ?: return@get call.respond(HttpStatusCode.BadRequest)
+              ?: return@get call.respondError(HttpStatusCode.BadRequest, "invalid_request")
       try {
         val courseDetail = bykcService.getCourseDetail(username, courseId)
         call.respond(HttpStatusCode.OK, courseDetail)
+      } catch (e: LoginException) {
+        call.respondBykcError(e)
+      } catch (e: UpstreamTimeoutException) {
+        call.respondBykcError(e)
+      } catch (e: BykcException) {
+        call.respondBykcError(e)
       } catch (e: Exception) {
-        call.respond(
-            HttpStatusCode.InternalServerError,
-            ErrorResponse(ErrorDetails("internal_error", "Error")),
-        )
+        call.respondBykcError(e)
       }
     }
 
@@ -215,15 +219,12 @@ fun Route.bykcRouting() {
       val username = call.jwtUsername!!
       val courseId =
           call.parameters["courseId"]?.toLongOrNull()
-              ?: return@post call.respond(HttpStatusCode.BadRequest)
+              ?: return@post call.respondError(HttpStatusCode.BadRequest, "invalid_request")
       val signRequest =
           try {
             call.receive<BykcSignRequest>()
           } catch (e: Exception) {
-            return@post call.respond(
-                HttpStatusCode.BadRequest,
-                ErrorResponse(ErrorDetails("invalid_request", "Invalid body")),
-            )
+            return@post call.respondError(HttpStatusCode.BadRequest, "invalid_request")
           }
 
       try {
@@ -239,16 +240,42 @@ fun Route.bykcRouting() {
             onFailure = {
               call.respond(
                   HttpStatusCode.BadRequest,
-                  ErrorResponse(ErrorDetails("sign_failed", it.message ?: "Failed")),
+                  ErrorResponse(
+                      ErrorDetails("sign_failed", cn.edu.ubaa.auth.userFacingMessage("sign_failed"))
+                  ),
               )
             },
         )
+      } catch (e: UpstreamTimeoutException) {
+        call.respondBykcError(e)
       } catch (e: Exception) {
-        call.respond(
-            HttpStatusCode.InternalServerError,
-            ErrorResponse(ErrorDetails("internal_error", "Error")),
-        )
+        call.respondBykcError(e)
       }
     }
   }
+}
+
+private suspend fun ApplicationCall.respondBykcError(error: Throwable) {
+  val (status, details) =
+      when (error) {
+        is LoginException ->
+            HttpStatusCode.Unauthorized to
+                ErrorDetails(
+                    "unauthenticated",
+                    cn.edu.ubaa.auth.userFacingMessage("unauthenticated"),
+                )
+        is UpstreamTimeoutException ->
+            HttpStatusCode.GatewayTimeout to
+                ErrorDetails(error.code, cn.edu.ubaa.auth.userFacingMessage(error.code))
+        is BykcException ->
+            HttpStatusCode.BadGateway to
+                ErrorDetails("bykc_error", cn.edu.ubaa.auth.userFacingMessage("bykc_error"))
+        else ->
+            HttpStatusCode.InternalServerError to
+                ErrorDetails(
+                    "internal_server_error",
+                    cn.edu.ubaa.auth.userFacingMessage("internal_server_error"),
+                )
+      }
+  respond(status, ErrorResponse(details))
 }

@@ -13,32 +13,43 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
 /** 自动评教业务逻辑 ViewModel。 负责管理待评教课程列表、处理用户选择以及执行分批次评教提交。 */
-class EvaluationViewModel : ViewModel() {
-  private val evaluationService = EvaluationService(ApiClient())
+class EvaluationViewModel(
+    private val evaluationService: EvaluationService = EvaluationService(ApiClient()),
+) : ViewModel() {
+  private var loadedOnce = false
 
   private val _uiState = MutableStateFlow(EvaluationUiState())
   /** 评教界面的 UI 状态流。 */
   val uiState: StateFlow<EvaluationUiState> = _uiState.asStateFlow()
 
-  init {
+  fun ensureLoaded(forceRefresh: Boolean = false) {
+    if (!forceRefresh && loadedOnce) return
     loadPendingCourses()
   }
 
   /** 加载当前用户的评教课程列表（包括已评教和未评教）。 未评教课程默认全选，已评教课程不可选。 */
   fun loadPendingCourses() {
+    loadedOnce = true
     viewModelScope.launch {
       _uiState.value =
           _uiState.value.copy(isLoading = true, error = null, submissionResults = emptyList())
-      val response = evaluationService.getAllEvaluations()
-      val courses = response.courses
-      _uiState.value =
-          _uiState.value.copy(
-              isLoading = false,
-              // 未评教的课程默认选中，已评教的课程不选中（且不可选）
-              courses = courses.map { it to !it.isEvaluated },
-              progress = response.progress,
-              error = if (courses.isEmpty() && !uiState.value.isLoading) "暂无评教课程" else null,
-          )
+      evaluationService
+          .getAllEvaluations()
+          .onSuccess { response ->
+            val courses = response.courses
+            _uiState.value =
+                _uiState.value.copy(
+                    isLoading = false,
+                    // 未评教的课程默认选中，已评教的课程不选中（且不可选）
+                    courses = courses.map { it to !it.isEvaluated },
+                    progress = response.progress,
+                    error = if (courses.isEmpty()) "暂无评教课程" else null,
+                )
+          }
+          .onFailure { error ->
+            _uiState.value =
+                _uiState.value.copy(isLoading = false, error = error.message ?: "评教列表加载失败")
+          }
     }
   }
 

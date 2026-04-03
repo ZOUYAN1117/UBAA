@@ -9,6 +9,8 @@ import io.ktor.client.request.*
 import io.ktor.client.statement.*
 import io.ktor.http.*
 import java.util.Base64
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
@@ -24,6 +26,7 @@ open class BykcClient(private val username: String) {
   private val log = LoggerFactory.getLogger(BykcClient::class.java)
   private val sessionManager: SessionManager = GlobalSessionManager.instance
   private val json = Json { ignoreUnknownKeys = true }
+  private val loginMutex = Mutex()
 
   // 博雅系统特有的 auth_token，从 SSO 重定向 URL 中提取
   private var bykcToken: String? = null
@@ -44,45 +47,39 @@ open class BykcClient(private val username: String) {
    * @throws IllegalStateException 当没有活跃会话时抛出。
    */
   open suspend fun login(forceRefresh: Boolean = false): Boolean {
-
     if (!forceRefresh && bykcToken != null) return true
 
-    val s = ensureSession()
+    return loginMutex.withLock {
+      if (!forceRefresh && bykcToken != null) return@withLock true
 
-    val client = s.client
+      val s = ensureSession()
+      val client = s.client
 
-    val resp = client.get(VpnCipher.toVpnUrl("https://bykc.buaa.edu.cn/sscv/cas/login"))
+      val resp = client.get(VpnCipher.toVpnUrl("https://bykc.buaa.edu.cn/sscv/cas/login"))
+      val finalUrl = resp.request.url.toString()
 
-    val finalUrl = resp.request.url.toString()
-
-    val token =
-        if (finalUrl.contains("?token=")) {
-
-          finalUrl.substringAfter("?token=")
-        } else {
-
-          resp.headers["Location"]?.let {
-            if (it.contains("?token=")) it.substringAfter("?token=") else null
+      val token =
+          if (finalUrl.contains("?token=")) {
+            finalUrl.substringAfter("?token=")
+          } else {
+            resp.headers["Location"]?.let {
+              if (it.contains("?token=")) it.substringAfter("?token=") else null
+            }
           }
-        }
 
-    if (token != null) {
+      if (token != null) {
+        bykcToken = token
+        lastLoginMillis = System.currentTimeMillis()
+        return@withLock true
+      }
 
-      bykcToken = token
+      try {
+        client.get(VpnCipher.toVpnUrl("https://bykc.buaa.edu.cn/cas-login?token="))
+      } catch (_: Exception) {}
 
       lastLoginMillis = System.currentTimeMillis()
-
-      return true
+      true
     }
-
-    try {
-
-      client.get(VpnCipher.toVpnUrl("https://bykc.buaa.edu.cn/cas-login?token="))
-    } catch (_: Exception) {}
-
-    lastLoginMillis = System.currentTimeMillis()
-
-    return true
   }
 
   /**

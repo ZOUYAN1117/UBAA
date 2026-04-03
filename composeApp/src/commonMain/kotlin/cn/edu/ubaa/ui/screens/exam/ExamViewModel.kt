@@ -5,29 +5,34 @@ import androidx.lifecycle.viewModelScope
 import cn.edu.ubaa.api.ScheduleApi
 import cn.edu.ubaa.model.dto.ExamArrangementData
 import cn.edu.ubaa.model.dto.Term
+import cn.edu.ubaa.repository.GlobalTermRepository
 import cn.edu.ubaa.repository.TermRepository
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
-class ExamViewModel : ViewModel() {
-  private val scheduleApi = ScheduleApi()
-  private val termRepository = TermRepository()
+class ExamViewModel(
+    private val scheduleApi: ScheduleApi = ScheduleApi(),
+    private val termRepository: TermRepository = GlobalTermRepository.instance,
+) : ViewModel() {
+  private var loadedOnce = false
 
   private val _uiState = MutableStateFlow(ExamUiState())
   val uiState: StateFlow<ExamUiState> = _uiState.asStateFlow()
 
-  init {
-    loadTerms()
+  fun ensureLoaded(forceRefresh: Boolean = false) {
+    if (!forceRefresh && loadedOnce) return
+    loadTerms(forceRefresh)
   }
 
-  fun loadTerms() {
+  fun loadTerms(forceRefresh: Boolean = false) {
+    loadedOnce = true
     viewModelScope.launch {
       _uiState.value = _uiState.value.copy(isLoading = true, error = null)
 
       termRepository
-          .getTerms()
+          .getTerms(forceRefresh)
           .onSuccess { terms ->
             val selectedTerm = terms.find { it.selected } ?: terms.firstOrNull()
             _uiState.value =

@@ -45,6 +45,7 @@ class YgdkViewModelTest {
         )
 
     val viewModel = YgdkViewModel(api)
+    viewModel.ensureLoaded()
     advanceUntilIdle()
 
     val state = viewModel.uiState.value
@@ -85,6 +86,7 @@ class YgdkViewModelTest {
                 ),
         )
     val viewModel = YgdkViewModel(api)
+    viewModel.ensureLoaded()
     advanceUntilIdle()
 
     viewModel.loadMoreRecords()
@@ -108,6 +110,7 @@ class YgdkViewModelTest {
                 ),
         )
     val viewModel = YgdkViewModel(api)
+    viewModel.ensureLoaded()
     advanceUntilIdle()
 
     viewModel.updateStartTime("2026-04-01 08:00")
@@ -146,6 +149,7 @@ class YgdkViewModelTest {
                 ),
         )
     val viewModel = YgdkViewModel(api)
+    viewModel.ensureLoaded()
     advanceUntilIdle()
 
     viewModel.updateItemId(2)
@@ -200,6 +204,7 @@ class YgdkViewModelTest {
                 ),
         )
     val viewModel = YgdkViewModel(api)
+    viewModel.ensureLoaded()
     advanceUntilIdle()
 
     viewModel.setPhoto(PickedImage(byteArrayOf(4, 5), "sample.jpg", "image/jpeg"))
@@ -208,6 +213,25 @@ class YgdkViewModelTest {
     viewModel.clearPhoto()
 
     assertNull(viewModel.uiState.value.form.photo)
+  }
+
+  @Test
+  fun `does not load before ensureLoaded is called`() = runTest {
+    setMainDispatcher(testScheduler)
+    val api =
+        FakeYgdkApi(
+            overviewResults = mutableListOf(Result.success(sampleOverview())),
+            recordsResults =
+                mutableMapOf(
+                    1 to mutableListOf(Result.success(sampleRecordsPage(hasMore = false)))
+                ),
+        )
+
+    YgdkViewModel(api)
+    advanceUntilIdle()
+
+    assertEquals(0, api.overviewCalls)
+    assertTrue(api.recordCallPages.isEmpty())
   }
 
   private fun setMainDispatcher(testScheduler: TestCoroutineScheduler) {
@@ -245,6 +269,9 @@ class YgdkViewModelTest {
       private val submitResult: Result<YgdkClockinSubmitResponse> =
           Result.success(YgdkClockinSubmitResponse(success = true, message = "打卡成功", recordId = 1)),
   ) : YgdkApi() {
+    var overviewCalls = 0
+      private set
+
     var submitCalls = 0
       private set
 
@@ -254,6 +281,7 @@ class YgdkViewModelTest {
     val recordCallPages = mutableListOf<Int>()
 
     override suspend fun getOverview(): Result<YgdkOverviewResponse> {
+      overviewCalls++
       return overviewResults.removeFirstOrNull() ?: Result.success(sampleFallbackOverview())
     }
 

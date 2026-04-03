@@ -7,6 +7,7 @@ import cn.edu.ubaa.model.dto.YgdkOverviewResponse
 import cn.edu.ubaa.model.dto.YgdkRecordDto
 import cn.edu.ubaa.model.dto.YgdkRecordsPageResponse
 import cn.edu.ubaa.model.dto.YgdkTermSummaryDto
+import cn.edu.ubaa.utils.withUpstreamDeadline
 import java.awt.image.BufferedImage
 import java.io.ByteArrayOutputStream
 import java.time.LocalDateTime
@@ -16,6 +17,9 @@ import java.time.format.DateTimeFormatter
 import java.util.concurrent.ConcurrentHashMap
 import javax.imageio.ImageIO
 import kotlin.random.Random
+import kotlin.time.Duration.Companion.seconds
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 private const val YGDK_ZONE_ID = "Asia/Shanghai"
 private val YGDK_DATETIME_FORMATTER: DateTimeFormatter =
@@ -62,88 +66,103 @@ internal class YgdkService(
       val summary: YgdkTermSummaryDto,
   )
 
+  private data class CachedContext(
+      val context: ResolvedContext,
+      val expiresAtMillis: Long,
+  )
+
   private val clientCache = ConcurrentHashMap<String, CachedClient>()
+  private val contextCache = ConcurrentHashMap<String, CachedContext>()
+  private val contextMutexes = ConcurrentHashMap<String, Mutex>()
 
   suspend fun getOverview(username: String): YgdkOverviewResponse {
-    val context = resolveContext(username)
-    return YgdkOverviewResponse(
-        summary = context.summary,
-        classifyId = context.classify.classifyId,
-        classifyName = context.classify.name,
-        defaultItemId = context.defaultItem.itemId,
-        defaultItemName = context.defaultItem.name,
-        items = context.items.map { it.toDto() },
-    )
+    return withUpstreamDeadline(9.seconds, "阳光打卡概览加载超时", "ygdk_timeout") {
+      val context = resolveContext(username)
+      YgdkOverviewResponse(
+          summary = context.summary,
+          classifyId = context.classify.classifyId,
+          classifyName = context.classify.name,
+          defaultItemId = context.defaultItem.itemId,
+          defaultItemName = context.defaultItem.name,
+          items = context.items.map { it.toDto() },
+      )
+    }
   }
 
   suspend fun getRecords(username: String, page: Int, size: Int): YgdkRecordsPageResponse {
-    if (page <= 0 || size <= 0) throw YgdkException("分页参数无效", code = "invalid_request")
-    val context = resolveContext(username)
-    val records =
-        withFreshClientRetry(username) { client ->
-          client.getRecords(context.classify.classifyId, page, size)
-        }
-    val itemMap = context.items.associateBy { it.itemId }
-    return YgdkRecordsPageResponse(
-        content = records.records.map { it.toDto(itemMap) },
-        total = records.total,
-        page = page,
-        size = size,
-        hasMore = page * size < records.total,
-    )
+    return withUpstreamDeadline(9.seconds, "阳光打卡记录加载超时", "ygdk_timeout") {
+      if (page <= 0 || size <= 0) throw YgdkException("分页参数无效", code = "invalid_request")
+      val context = resolveContext(username)
+      val records =
+          withFreshClientRetry(username) { client ->
+            client.getRecords(context.classify.classifyId, page, size)
+          }
+      val itemMap = context.items.associateBy { it.itemId }
+      YgdkRecordsPageResponse(
+          content = records.records.map { it.toDto(itemMap) },
+          total = records.total,
+          page = page,
+          size = size,
+          hasMore = page * size < records.total,
+      )
+    }
   }
 
   suspend fun submitClockin(
       username: String,
       request: YgdkClockinSubmitRequest,
   ): YgdkClockinSubmitResponse {
-    val context = resolveContext(username)
-    val item =
-        request.itemId?.let { itemId ->
-          context.items.firstOrNull { it.itemId == itemId }
-              ?: throw YgdkException("所选运动项目不存在", code = "invalid_request")
-        } ?: context.defaultItem
+    return withUpstreamDeadline(9.seconds, "阳光打卡提交超时", "ygdk_timeout") {
+      val context = resolveContext(username)
+      val item =
+          request.itemId?.let { itemId ->
+            context.items.firstOrNull { it.itemId == itemId }
+                ?: throw YgdkException("所选运动项目不存在", code = "invalid_request")
+          } ?: context.defaultItem
 
-    val (startAt, endAt) = resolveTimeRange(request.startTime, request.endTime)
-    val place = request.place?.trim().takeUnless { it.isNullOrBlank() } ?: DEFAULT_PLACE
-    val shareToSquare = request.shareToSquare ?: false
-    val upload =
-        request.photo?.let {
-          YgdkGeneratedImage(bytes = it.bytes, fileName = it.fileName, mimeType = it.mimeType)
-        } ?: imageGenerator.generate()
+      val (startAt, endAt) = resolveTimeRange(request.startTime, request.endTime)
+      val place = request.place?.trim().takeUnless { it.isNullOrBlank() } ?: DEFAULT_PLACE
+      val shareToSquare = request.shareToSquare ?: false
+      val upload =
+          request.photo?.let {
+            YgdkGeneratedImage(bytes = it.bytes, fileName = it.fileName, mimeType = it.mimeType)
+          } ?: imageGenerator.generate()
 
-    val uploadedFile =
-        withFreshClientRetry(username) { client ->
-          client.uploadImage(
-              bytes = upload.bytes,
-              fileName = upload.fileName,
-              mimeType = upload.mimeType,
-          )
-        }
-    val result =
-        withFreshClientRetry(username) { client ->
-          client.clockin(
-              classifyId = context.classify.classifyId,
-              itemId = item.itemId,
-              itemName = item.name,
-              startAt = startAt,
-              endAt = endAt,
-              place = place,
-              imageName = uploadedFile.fileName,
-              isOpen = shareToSquare,
-          )
-        }
+      val uploadedFile =
+          withFreshClientRetry(username) { client ->
+            client.uploadImage(
+                bytes = upload.bytes,
+                fileName = upload.fileName,
+                mimeType = upload.mimeType,
+            )
+          }
+      val result =
+          withFreshClientRetry(username) { client ->
+            client.clockin(
+                classifyId = context.classify.classifyId,
+                itemId = item.itemId,
+                itemName = item.name,
+                startAt = startAt,
+                endAt = endAt,
+                place = place,
+                imageName = uploadedFile.fileName,
+                isOpen = shareToSquare,
+            )
+          }
 
-    return YgdkClockinSubmitResponse(
-        success = true,
-        message = "打卡成功",
-        recordId = result.recordId,
-        summary = mergeSubmitSummary(context.summary, result),
-    )
+      invalidateContext(username)
+      YgdkClockinSubmitResponse(
+          success = true,
+          message = "打卡成功",
+          recordId = result.recordId,
+          summary = mergeSubmitSummary(context.summary, result),
+      )
+    }
   }
 
   fun cleanupExpiredClients(maxIdleMillis: Long = DEFAULT_MAX_IDLE_MILLIS): Int {
-    val cutoff = System.currentTimeMillis() - maxIdleMillis
+    val now = System.currentTimeMillis()
+    val cutoff = now - maxIdleMillis
     var removed = 0
     for ((username, cached) in clientCache.entries.toList()) {
       if (cached.lastAccessAt >= cutoff) continue
@@ -151,6 +170,8 @@ internal class YgdkService(
       cached.client.close()
       removed++
     }
+    cleanupExpiredContexts(now)
+    cleanupOrphanedContextMutexes()
     return removed
   }
 
@@ -159,21 +180,80 @@ internal class YgdkService(
   fun clearCache() {
     clientCache.values.forEach { it.client.close() }
     clientCache.clear()
+    contextCache.clear()
+    contextMutexes.clear()
   }
 
+  internal fun cacheClientForTesting(
+      username: String,
+      client: YgdkClient,
+      lastAccessAt: Long = System.currentTimeMillis(),
+  ) {
+    clientCache[username] = CachedClient(client, lastAccessAt)
+  }
+
+  internal fun cacheContextForTesting(
+      username: String,
+      expiresAtMillis: Long,
+  ) {
+    val defaultItem = YgdkItemRaw(itemId = 1, name = "跑步")
+    contextCache[username] =
+        CachedContext(
+            context =
+                ResolvedContext(
+                    classify = YgdkClassifyRaw(classifyId = 1, name = "阳光体育"),
+                    items = listOf(defaultItem),
+                    defaultItem = defaultItem,
+                    summary = YgdkTermSummaryDto(termCount = 0),
+                ),
+            expiresAtMillis = expiresAtMillis,
+        )
+    contextMutexes.computeIfAbsent(username) { Mutex() }
+  }
+
+  internal fun hasCachedContextForTesting(username: String): Boolean =
+      contextCache.containsKey(username)
+
+  internal fun hasContextMutexForTesting(username: String): Boolean =
+      contextMutexes.containsKey(username)
+
   private suspend fun resolveContext(username: String): ResolvedContext {
-    return withFreshClientRetry(username) { client ->
-      val classify = resolveSportsClassify(client.getClassifyList())
-      val items = client.getItemList(classify.classifyId)
-      val defaultItem = resolveDefaultItem(items)
-      val count = runCatching { client.getCheckCount(classify.classifyId) }.getOrNull()
-      val term = runCatching { client.getTerm() }.getOrNull()
-      ResolvedContext(
-          classify = classify,
-          items = items,
-          defaultItem = defaultItem,
-          summary = mapSummary(classify, count, term),
-      )
+    val now = System.currentTimeMillis()
+    contextCache[username]
+        ?.takeIf { it.expiresAtMillis > now }
+        ?.let {
+          return it.context
+        }
+
+    val mutex = contextMutexes.computeIfAbsent(username) { Mutex() }
+    return mutex.withLock {
+      val cachedNow = System.currentTimeMillis()
+      contextCache[username]
+          ?.takeIf { it.expiresAtMillis > cachedNow }
+          ?.let {
+            return@withLock it.context
+          }
+
+      val context =
+          withFreshClientRetry(username) { client ->
+            val classify = resolveSportsClassify(client.getClassifyList())
+            val items = client.getItemList(classify.classifyId)
+            val defaultItem = resolveDefaultItem(items)
+            val count = runCatching { client.getCheckCount(classify.classifyId) }.getOrNull()
+            val term = runCatching { client.getTerm() }.getOrNull()
+            ResolvedContext(
+                classify = classify,
+                items = items,
+                defaultItem = defaultItem,
+                summary = mapSummary(classify, count, term),
+            )
+          }
+      contextCache[username] =
+          CachedContext(
+              context = context,
+              expiresAtMillis = System.currentTimeMillis() + RESOLVED_CONTEXT_TTL_MILLIS,
+          )
+      context
     }
   }
 
@@ -194,12 +274,31 @@ internal class YgdkService(
       block(getClient(username))
     } catch (e: YgdkAuthenticationException) {
       discardClient(username)
+      invalidateContext(username)
       block(getClient(username))
     }
   }
 
   private fun discardClient(username: String) {
     clientCache.remove(username)?.client?.close()
+  }
+
+  private fun invalidateContext(username: String) {
+    contextCache.remove(username)
+  }
+
+  private fun cleanupExpiredContexts(nowMillis: Long) {
+    for ((username, cached) in contextCache.entries.toList()) {
+      if (cached.expiresAtMillis > nowMillis) continue
+      contextCache.remove(username, cached)
+    }
+  }
+
+  private fun cleanupOrphanedContextMutexes() {
+    for ((username, mutex) in contextMutexes.entries.toList()) {
+      if (contextCache.containsKey(username) || clientCache.containsKey(username)) continue
+      contextMutexes.remove(username, mutex)
+    }
   }
 
   private fun resolveSportsClassify(classifies: List<YgdkClassifyRaw>): YgdkClassifyRaw {
@@ -337,6 +436,7 @@ internal class YgdkService(
     private const val DEFAULT_MAX_IDLE_MILLIS = 30 * 60 * 1000L
     private const val DEFAULT_PLACE = "操场"
     private const val DEFAULT_RANDOM_DAY_RANGE_DAYS = 3
+    private const val RESOLVED_CONTEXT_TTL_MILLIS = 60_000L
   }
 }
 

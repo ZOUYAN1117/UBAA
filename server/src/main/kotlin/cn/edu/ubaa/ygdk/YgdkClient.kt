@@ -24,6 +24,8 @@ import java.time.Instant
 import java.time.LocalDateTime
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
@@ -116,6 +118,7 @@ internal open class YgdkClient(
 ) {
   private val json = Json { ignoreUnknownKeys = true }
   private var authData: YgdkAuthData? = null
+  private val authMutex = Mutex()
 
   open suspend fun getClassifyList(): List<YgdkClassifyRaw> {
     val result = postForm("/Front/Clockin/Classify/getList")
@@ -269,8 +272,11 @@ internal open class YgdkClient(
 
   private suspend fun ensureLogin(forceRefresh: Boolean = false) {
     if (!forceRefresh && authData != null) return
-    val code = fetchOauthCode()
-    authData = exchangeCode(code)
+    authMutex.withLock {
+      if (!forceRefresh && authData != null) return@withLock
+      val code = fetchOauthCode()
+      authData = exchangeCode(code)
+    }
   }
 
   private suspend fun fetchOauthCode(): String {

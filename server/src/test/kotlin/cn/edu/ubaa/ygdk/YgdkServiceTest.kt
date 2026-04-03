@@ -75,6 +75,68 @@ class YgdkServiceTest {
   }
 
   @Test
+  fun `getRecords reuses resolved context from recent overview`() = runBlocking {
+    val client =
+        object : FakeYgdkClient() {
+          var classifyCalls = 0
+          var itemCalls = 0
+          var countCalls = 0
+          var termCalls = 0
+
+          override suspend fun getClassifyList(): List<YgdkClassifyRaw> {
+            classifyCalls++
+            return super.getClassifyList()
+          }
+
+          override suspend fun getItemList(classifyId: Int): List<YgdkItemRaw> {
+            itemCalls++
+            return super.getItemList(classifyId)
+          }
+
+          override suspend fun getCheckCount(classifyId: Int): YgdkCountRaw {
+            countCalls++
+            return super.getCheckCount(classifyId)
+          }
+
+          override suspend fun getTerm(): YgdkTermRaw {
+            termCalls++
+            return super.getTerm()
+          }
+        }
+    val service = YgdkService(clientProvider = { client })
+
+    service.getOverview("2418")
+    service.getRecords("2418", page = 1, size = 20)
+
+    assertEquals(1, client.classifyCalls)
+    assertEquals(1, client.itemCalls)
+    assertEquals(1, client.countCalls)
+    assertEquals(1, client.termCalls)
+  }
+
+  @Test
+  fun `cleanupExpiredClients removes expired contexts and orphaned mutexes`() {
+    val service = YgdkService(clientProvider = { FakeYgdkClient() })
+    val now = System.currentTimeMillis()
+
+    service.cacheContextForTesting("expired", now - 1)
+    service.cacheContextForTesting("active", now + 60_000)
+    service.cacheClientForTesting(
+        username = "active",
+        client = FakeYgdkClient(),
+        lastAccessAt = now,
+    )
+
+    val removed = service.cleanupExpiredClients()
+
+    assertEquals(0, removed)
+    assertFalse(service.hasCachedContextForTesting("expired"))
+    assertFalse(service.hasContextMutexForTesting("expired"))
+    assertTrue(service.hasCachedContextForTesting("active"))
+    assertTrue(service.hasContextMutexForTesting("active"))
+  }
+
+  @Test
   fun `image generator creates fully transparent png`() {
     val generated = YgdkImageGenerator(fileNameProvider = { "transparent.png" }).generate()
     val image = ImageIO.read(ByteArrayInputStream(generated.bytes))

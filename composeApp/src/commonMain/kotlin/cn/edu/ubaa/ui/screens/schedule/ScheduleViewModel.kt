@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import cn.edu.ubaa.api.ScheduleApi
 import cn.edu.ubaa.model.dto.*
+import cn.edu.ubaa.repository.GlobalTermRepository
 import cn.edu.ubaa.repository.TermRepository
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -11,9 +12,12 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
 /** 课程表相关业务逻辑的 ViewModel。 负责拉取学期列表、周次列表、周课表详情以及今日课表摘要。 */
-class ScheduleViewModel : ViewModel() {
-  private val scheduleApi = ScheduleApi()
-  private val termRepository = TermRepository()
+class ScheduleViewModel(
+    private val scheduleApi: ScheduleApi = ScheduleApi(),
+    private val termRepository: TermRepository = GlobalTermRepository.instance,
+) : ViewModel() {
+  private var todayLoadedOnce = false
+  private var scheduleLoadedOnce = false
 
   private val _uiState = MutableStateFlow(ScheduleUiState())
   /** 周课表选择与展示的状态流。 */
@@ -23,13 +27,19 @@ class ScheduleViewModel : ViewModel() {
   /** 今日课表简要摘要的状态流。 */
   val todayScheduleState: StateFlow<TodayScheduleState> = _todayScheduleState.asStateFlow()
 
-  init {
+  fun ensureTodayLoaded(forceRefresh: Boolean = false) {
+    if (!forceRefresh && todayLoadedOnce) return
     loadTodaySchedule()
-    loadTerms()
+  }
+
+  fun ensureScheduleLoaded(forceRefresh: Boolean = false) {
+    if (!forceRefresh && scheduleLoadedOnce) return
+    loadTerms(forceRefresh)
   }
 
   /** 加载今日的课程安排摘要。 */
   fun loadTodaySchedule() {
+    todayLoadedOnce = true
     viewModelScope.launch {
       _todayScheduleState.value = _todayScheduleState.value.copy(isLoading = true, error = null)
       scheduleApi
@@ -46,11 +56,12 @@ class ScheduleViewModel : ViewModel() {
   }
 
   /** 加载学期列表。 */
-  fun loadTerms() {
+  fun loadTerms(forceRefresh: Boolean = false) {
+    scheduleLoadedOnce = true
     viewModelScope.launch {
       _uiState.value = _uiState.value.copy(isLoading = true, error = null)
       termRepository
-          .getTerms()
+          .getTerms(forceRefresh)
           .onSuccess { terms ->
             val selectedTerm = terms.find { it.selected } ?: terms.firstOrNull()
             _uiState.value =

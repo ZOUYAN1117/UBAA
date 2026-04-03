@@ -1,10 +1,12 @@
 package cn.edu.ubaa
 
+import cn.edu.ubaa.auth.GlobalAcademicPortalWarmupCoordinator
 import cn.edu.ubaa.auth.GlobalRefreshTokenService
 import cn.edu.ubaa.auth.GlobalSessionManager
 import cn.edu.ubaa.auth.JwtAuth
 import cn.edu.ubaa.auth.JwtAuth.configureJwtAuth
 import cn.edu.ubaa.auth.authRouting
+import cn.edu.ubaa.auth.configureGlobalErrorHandling
 import cn.edu.ubaa.bykc.GlobalBykcService
 import cn.edu.ubaa.bykc.bykcRouting
 import cn.edu.ubaa.cgyy.GlobalCgyyService
@@ -12,6 +14,9 @@ import cn.edu.ubaa.cgyy.cgyyRouting
 import cn.edu.ubaa.classroom.classroomRouting
 import cn.edu.ubaa.evaluation.evaluationRouting
 import cn.edu.ubaa.exam.examRouting
+import cn.edu.ubaa.metrics.GaugeBindings
+import cn.edu.ubaa.metrics.LoginMetricsRecorder
+import cn.edu.ubaa.metrics.RedisLoginStatsStore
 import cn.edu.ubaa.schedule.scheduleRouting
 import cn.edu.ubaa.signin.SigninService
 import cn.edu.ubaa.signin.signinRouting
@@ -19,6 +24,9 @@ import cn.edu.ubaa.spoc.GlobalSpocService
 import cn.edu.ubaa.spoc.spocRouting
 import cn.edu.ubaa.user.userRouting
 import cn.edu.ubaa.utils.HeadlessImageSupport
+import cn.edu.ubaa.version.AppVersionService
+import cn.edu.ubaa.version.GlobalAppVersionService
+import cn.edu.ubaa.version.appVersionRouting
 import cn.edu.ubaa.ygdk.GlobalYgdkService
 import cn.edu.ubaa.ygdk.ygdkRouting
 import io.github.cdimascio.dotenv.dotenv
@@ -34,7 +42,6 @@ import io.ktor.server.plugins.contentnegotiation.*
 import io.ktor.server.plugins.cors.routing.*
 import io.ktor.server.response.*
 import io.ktor.server.routing.*
-import io.micrometer.core.instrument.Gauge
 import io.micrometer.prometheusmetrics.*
 import kotlin.time.Duration.Companion.minutes
 import kotlinx.coroutines.CoroutineScope
@@ -64,13 +71,22 @@ fun main() {
 val log = LoggerFactory.getLogger("Application")
 
 /** 全局 Prometheus 指标注册表。 */
-val appMicrometerRegistry = PrometheusMeterRegistry(PrometheusConfig.DEFAULT)
-
 /** Ktor 应用模块主配置。 负责安装插件（JWT, CORS, ContentNegotiation, Metrics）并注册业务路由。 */
 fun Application.module() {
-  log.info("Initializing Application module...")
+  val metricsRegistry = PrometheusMeterRegistry(PrometheusConfig.DEFAULT)
+  val loginMetricsRecorder = LoginMetricsRecorder(RedisLoginStatsStore(), metricsRegistry)
+  module(metricsRegistry, loginMetricsRecorder, GlobalAppVersionService.instance)
+}
 
-  install(MicrometerMetrics) { registry = appMicrometerRegistry }
+internal fun Application.module(
+    metricsRegistry: PrometheusMeterRegistry,
+    loginMetricsRecorder: LoginMetricsRecorder,
+    appVersionService: AppVersionService = GlobalAppVersionService.instance,
+) {
+  log.info("Initializing Application module...")
+  loginMetricsRecorder.bindMetrics()
+
+  install(MicrometerMetrics) { registry = metricsRegistry }
   install(CallLogging) { level = Level.INFO }
   configureJwtAuth()
 
@@ -86,13 +102,21 @@ fun Application.module() {
   }
 
   install(ContentNegotiation) { json() }
+  configureGlobalErrorHandling()
 
   val sessionManager = GlobalSessionManager.instance
   val bykcService = GlobalBykcService.instance
   val cgyyService = GlobalCgyyService.instance
   val spocService = GlobalSpocService.instance
   val ygdkService = GlobalYgdkService.instance
-  registerPerformanceGauges(sessionManager, bykcService, cgyyService, spocService, ygdkService)
+  registerPerformanceGauges(
+      metricsRegistry,
+      sessionManager,
+      bykcService,
+      cgyyService,
+      spocService,
+      ygdkService,
+  )
 
   val cleanupScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
   cleanupScope.launch {
@@ -135,14 +159,18 @@ fun Application.module() {
     cgyyService.clearCache()
     spocService.clearCache()
     ygdkService.clearCache()
+    GlobalAcademicPortalWarmupCoordinator.close()
     sessionManager.close()
+    GlobalAppVersionService.release(appVersionService)
     GlobalRefreshTokenService.instance.close()
+    loginMetricsRecorder.close()
   }
 
   routing {
-    get("/metrics") { call.respondText(appMicrometerRegistry.scrape()) }
+    get("/metrics") { call.respondText(metricsRegistry.scrape()) }
 
-    authRouting()
+    appVersionRouting(appVersionService)
+    authRouting(loginMetricsRecorder)
 
     authenticate(JwtAuth.JWT_AUTH) {
       log.info("Registering authenticated routes...")
@@ -163,25 +191,23 @@ fun Application.module() {
   log.info("Application module initialized successfully.")
 }
 
-private fun registerPerformanceGauges(
+internal fun registerPerformanceGauges(
+    metricsRegistry: PrometheusMeterRegistry,
     sessionManager: cn.edu.ubaa.auth.SessionManager,
     bykcService: cn.edu.ubaa.bykc.BykcService,
     cgyyService: cn.edu.ubaa.cgyy.CgyyService,
     spocService: cn.edu.ubaa.spoc.SpocService,
     ygdkService: cn.edu.ubaa.ygdk.YgdkService,
 ) {
-  Gauge.builder("ubaa.sessions.active") { sessionManager.activeSessionCount().toDouble() }
-      .register(appMicrometerRegistry)
-  Gauge.builder("ubaa.sessions.prelogin") { sessionManager.preLoginSessionCount().toDouble() }
-      .register(appMicrometerRegistry)
-  Gauge.builder("ubaa.signin.cache") { SigninService.cacheSize().toDouble() }
-      .register(appMicrometerRegistry)
-  Gauge.builder("ubaa.bykc.cache") { bykcService.cacheSize().toDouble() }
-      .register(appMicrometerRegistry)
-  Gauge.builder("ubaa.cgyy.cache") { cgyyService.cacheSize().toDouble() }
-      .register(appMicrometerRegistry)
-  Gauge.builder("ubaa.spoc.cache") { spocService.cacheSize().toDouble() }
-      .register(appMicrometerRegistry)
-  Gauge.builder("ubaa.ygdk.cache") { ygdkService.cacheSize().toDouble() }
-      .register(appMicrometerRegistry)
+  GaugeBindings.bind(metricsRegistry, "ubaa.sessions.active") {
+    sessionManager.activeSessionCount().toDouble()
+  }
+  GaugeBindings.bind(metricsRegistry, "ubaa.sessions.prelogin") {
+    sessionManager.preLoginSessionCount().toDouble()
+  }
+  GaugeBindings.bind(metricsRegistry, "ubaa.signin.cache") { SigninService.cacheSize().toDouble() }
+  GaugeBindings.bind(metricsRegistry, "ubaa.bykc.cache") { bykcService.cacheSize().toDouble() }
+  GaugeBindings.bind(metricsRegistry, "ubaa.cgyy.cache") { cgyyService.cacheSize().toDouble() }
+  GaugeBindings.bind(metricsRegistry, "ubaa.spoc.cache") { spocService.cacheSize().toDouble() }
+  GaugeBindings.bind(metricsRegistry, "ubaa.ygdk.cache") { ygdkService.cacheSize().toDouble() }
 }

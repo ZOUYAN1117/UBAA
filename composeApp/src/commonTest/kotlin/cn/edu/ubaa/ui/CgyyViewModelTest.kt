@@ -45,6 +45,7 @@ class CgyyViewModelTest {
     val api = FakeCgyyApi()
     val viewModel = CgyyViewModel(api, currentDateProvider = { "2026-03-29" })
 
+    viewModel.ensureInitialDataLoaded()
     advanceUntilIdle()
 
     assertEquals(1, viewModel.uiState.value.sites.size)
@@ -60,6 +61,7 @@ class CgyyViewModelTest {
     CgyyReservationFormStore.clear()
     val viewModel = CgyyViewModel(FakeCgyyApi(), currentDateProvider = { "2026-03-29" })
 
+    viewModel.ensureInitialDataLoaded()
     advanceUntilIdle()
     viewModel.toggleSlot(6, 241, null)
     viewModel.toggleSlot(6, 242, null)
@@ -80,6 +82,7 @@ class CgyyViewModelTest {
     CgyyReservationFormStore.clear()
     val viewModel = CgyyViewModel(FakeCgyyApi(), currentDateProvider = { "2026-03-29" })
 
+    viewModel.ensureInitialDataLoaded()
     advanceUntilIdle()
     viewModel.toggleSlot(6, 242, null)
     viewModel.toggleSlot(6, 242, null)
@@ -94,6 +97,7 @@ class CgyyViewModelTest {
     CgyyReservationFormStore.clear()
     val viewModel = CgyyViewModel(FakeCgyyApi(), currentDateProvider = { "2026-03-29" })
 
+    viewModel.ensureInitialDataLoaded()
     advanceUntilIdle()
     viewModel.toggleSlot(6, 241, null)
     viewModel.toggleSlot(6, 243, null)
@@ -113,6 +117,7 @@ class CgyyViewModelTest {
     val api = FakeCgyyApi()
     val viewModel = CgyyViewModel(api, currentDateProvider = { "2026-03-29" })
 
+    viewModel.ensureInitialDataLoaded()
     advanceUntilIdle()
     viewModel.updatePhone("18800000000")
     viewModel.updateTheme("讨论")
@@ -137,6 +142,7 @@ class CgyyViewModelTest {
     val api = FakeCgyyApi()
     val viewModel = CgyyViewModel(api, currentDateProvider = { "2026-03-29" })
 
+    viewModel.ensureInitialDataLoaded()
     advanceUntilIdle()
     viewModel.ensureOrdersLoaded()
     advanceUntilIdle()
@@ -151,6 +157,7 @@ class CgyyViewModelTest {
     CgyyReservationFormStore.clear()
     val viewModel = CgyyViewModel(FakeCgyyApi(), currentDateProvider = { "2026-03-29" })
 
+    viewModel.ensureInitialDataLoaded()
     advanceUntilIdle()
     viewModel.loadLockCode()
     advanceUntilIdle()
@@ -165,6 +172,7 @@ class CgyyViewModelTest {
     val api = FakeCgyyApi()
     val firstViewModel = CgyyViewModel(api, currentDateProvider = { "2026-03-29" })
 
+    firstViewModel.ensureInitialDataLoaded()
     advanceUntilIdle()
     firstViewModel.updatePhone("18800000000")
     firstViewModel.updateTheme("课题讨论")
@@ -178,6 +186,7 @@ class CgyyViewModelTest {
     advanceUntilIdle()
 
     val secondViewModel = CgyyViewModel(api, currentDateProvider = { "2026-03-29" })
+    secondViewModel.ensureInitialDataLoaded()
     advanceUntilIdle()
 
     assertEquals("18800000000", secondViewModel.uiState.value.phone)
@@ -208,6 +217,7 @@ class CgyyViewModelTest {
 
     val api = FakeCgyyApi()
     val viewModel = CgyyViewModel(api, currentDateProvider = { "2026-03-29" })
+    viewModel.ensureInitialDataLoaded()
     advanceUntilIdle()
 
     assertEquals(3, viewModel.uiState.value.purposeType)
@@ -221,6 +231,19 @@ class CgyyViewModelTest {
     viewModel.loadInitialData()
     advanceUntilIdle()
     assertEquals(3, viewModel.uiState.value.purposeType)
+  }
+
+  @Test
+  fun `does not fetch initial data before ensureInitialDataLoaded`() = runTest {
+    setMainDispatcher(testScheduler)
+    CgyyReservationFormStore.clear()
+    val api = FakeCgyyApi()
+
+    CgyyViewModel(api, currentDateProvider = { "2026-03-29" })
+    advanceUntilIdle()
+
+    assertEquals(0, api.dayInfoCalls)
+    assertEquals(0, api.ordersCalls)
   }
 
   private fun setMainDispatcher(testScheduler: TestCoroutineScheduler) {

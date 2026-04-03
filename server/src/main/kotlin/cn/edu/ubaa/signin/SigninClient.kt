@@ -14,6 +14,8 @@ import io.ktor.http.*
 import io.ktor.serialization.kotlinx.json.*
 import java.security.cert.X509Certificate
 import javax.net.ssl.X509TrustManager
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.json.*
 
 /**
@@ -45,29 +47,37 @@ class SigninClient(private val studentId: String) {
 
   private var userId: String? = null
   private var sessionId: String? = null
+  private val loginMutex = Mutex()
 
   /** 执行 iclass 登录。目前 iclass 支持学号直接登录（无密码模式或特定逻辑）。 */
   private suspend fun login(): Boolean {
-    return try {
-      val response =
-          client.get(VpnCipher.toVpnUrl("https://iclass.buaa.edu.cn:8347/app/user/login.action")) {
-            parameter("password", "")
-            parameter("phone", studentId)
-            parameter("userLevel", "1")
-            parameter("verificationType", "2")
-            parameter("verificationUrl", "")
-          }
-      if (!response.status.isSuccess()) return false
-      val body = response.bodyAsText()
-      val jsonResponse = json.parseToJsonElement(body).jsonObject
-      if (jsonResponse["STATUS"]?.jsonPrimitive?.intOrNull != 0) return false
+    if (userId != null && sessionId != null) return true
+    return loginMutex.withLock {
+      if (userId != null && sessionId != null) return@withLock true
 
-      val result = jsonResponse["result"]?.jsonObject
-      userId = result?.get("id")?.jsonPrimitive?.content
-      sessionId = result?.get("sessionId")?.jsonPrimitive?.content
-      userId != null && sessionId != null
-    } catch (_: Exception) {
-      false
+      try {
+        val response =
+            client.get(
+                VpnCipher.toVpnUrl("https://iclass.buaa.edu.cn:8347/app/user/login.action")
+            ) {
+              parameter("password", "")
+              parameter("phone", studentId)
+              parameter("userLevel", "1")
+              parameter("verificationType", "2")
+              parameter("verificationUrl", "")
+            }
+        if (!response.status.isSuccess()) return@withLock false
+        val body = response.bodyAsText()
+        val jsonResponse = json.parseToJsonElement(body).jsonObject
+        if (jsonResponse["STATUS"]?.jsonPrimitive?.intOrNull != 0) return@withLock false
+
+        val result = jsonResponse["result"]?.jsonObject
+        userId = result?.get("id")?.jsonPrimitive?.content
+        sessionId = result?.get("sessionId")?.jsonPrimitive?.content
+        userId != null && sessionId != null
+      } catch (_: Exception) {
+        false
+      }
     }
   }
 
@@ -132,9 +142,22 @@ class SigninClient(private val studentId: String) {
           jsonResponse["STATUS"]?.jsonPrimitive?.intOrNull == 0 &&
               jsonResponse["result"]?.jsonObject?.get("stuSignStatus")?.jsonPrimitive?.intOrNull ==
                   1
-      success to (jsonResponse["ERRMSG"]?.jsonPrimitive?.content ?: "未知状态")
+      success to sanitizeSignInMessage(success, jsonResponse["ERRMSG"]?.jsonPrimitive?.content)
     } catch (e: Exception) {
-      false to (e.message ?: "网络异常")
+      false to "签到失败，请稍后重试"
+    }
+  }
+
+  private fun sanitizeSignInMessage(success: Boolean, rawMessage: String?): String {
+    if (success) return rawMessage?.takeIf { it.isNotBlank() } ?: "签到成功"
+    val message = rawMessage.orEmpty()
+    return when {
+      "已签到" in message -> "您今天已经签到过了"
+      "未开始" in message -> "当前还未到签到时间"
+      "已结束" in message -> "本次签到已结束"
+      "范围" in message -> "当前不在可签到范围内"
+      "课程" in message && "不存在" in message -> "未找到对应课程，请刷新后重试"
+      else -> "签到失败，请稍后重试"
     }
   }
 

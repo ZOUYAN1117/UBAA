@@ -14,6 +14,8 @@ import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpMethod
 import io.ktor.http.Parameters
 import io.ktor.http.Url
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
@@ -86,6 +88,7 @@ class CgyyZhjsClient(
     private val signer: CgyySigner = CgyySigner(),
 ) : CgyyGateway {
   private val json = Json { ignoreUnknownKeys = true }
+  private val loginMutex = Mutex()
 
   @Volatile private var accessToken: String? = null
 
@@ -329,33 +332,36 @@ class CgyyZhjsClient(
 
   private suspend fun ensureBusinessLogin() {
     if (!accessToken.isNullOrBlank()) return
+    loginMutex.withLock {
+      if (!accessToken.isNullOrBlank()) return@withLock
 
-    val session = sessionManager.requireSession(username)
-    session.client.get("$BASE_URL/sso/manageLogin")
-    val ssoToken =
-        session.cookieStorage
-            .get(Url("$BASE_URL"))
-            .firstOrNull { it.name == SSO_COOKIE_NAME }
-            ?.value
-            ?.takeIf { it.isNotBlank() }
-            ?: throw CgyyException("未获取到研讨室 SSO Token", "unauthenticated")
+      val session = sessionManager.requireSession(username)
+      session.client.get("$BASE_URL/sso/manageLogin")
+      val ssoToken =
+          session.cookieStorage
+              .get(Url("$BASE_URL"))
+              .firstOrNull { it.name == SSO_COOKIE_NAME }
+              ?.value
+              ?.takeIf { it.isNotBlank() }
+              ?: throw CgyyException("未获取到研讨室 SSO Token", "unauthenticated")
 
-    val loginResponse =
-        requestJson(
-            method = HttpMethod.Post,
-            path = "/api/login",
-            extraHeaders = mapOf("Sso-Token" to ssoToken),
-            includeAuthorization = false,
-            allowRetry = false,
-        )
-    accessToken =
-        loginResponse.data
-            ?.jsonObject
-            ?.get("token")
-            ?.jsonObject
-            ?.get("access_token")
-            ?.jsonPrimitive
-            ?.contentOrNull ?: throw CgyyException("研讨室登录成功但未返回 access_token", "unauthenticated")
+      val loginResponse =
+          requestJson(
+              method = HttpMethod.Post,
+              path = "/api/login",
+              extraHeaders = mapOf("Sso-Token" to ssoToken),
+              includeAuthorization = false,
+              allowRetry = false,
+          )
+      accessToken =
+          loginResponse.data
+              ?.jsonObject
+              ?.get("token")
+              ?.jsonObject
+              ?.get("access_token")
+              ?.jsonPrimitive
+              ?.contentOrNull ?: throw CgyyException("研讨室登录成功但未返回 access_token", "unauthenticated")
+    }
   }
 
   private fun isLoginRedirect(response: HttpResponse, body: String): Boolean {

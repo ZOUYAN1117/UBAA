@@ -21,19 +21,23 @@ data class SigninUiState(
 )
 
 /** 管理课堂签到功能的 ViewModel。 */
-class SigninViewModel : ViewModel() {
-  private val signinApi = SigninApi()
+class SigninViewModel(
+    private val signinApi: SigninApi = SigninApi(),
+) : ViewModel() {
+  private var loadedOnce = false
 
   private val _uiState = MutableStateFlow(SigninUiState())
   /** 签到状态流。 */
   val uiState: StateFlow<SigninUiState> = _uiState.asStateFlow()
 
-  init {
+  fun ensureTodayLoaded(forceRefresh: Boolean = false) {
+    if (!forceRefresh && loadedOnce) return
     loadTodayClasses()
   }
 
   /** 拉取今日所有可签到的课堂。 */
   fun loadTodayClasses() {
+    loadedOnce = true
     viewModelScope.launch {
       _uiState.value = _uiState.value.copy(isLoading = true, error = null)
       signinApi
@@ -57,7 +61,10 @@ class SigninViewModel : ViewModel() {
                     signingInCourseId = null,
                     signinResult = if (response.success) "签到成功" else "签到失败: ${response.message}",
                 )
-            if (response.success) loadTodayClasses()
+            if (response.success) {
+              loadedOnce = false
+              ensureTodayLoaded(forceRefresh = true)
+            }
           }
           .onFailure {
             _uiState.value =

@@ -177,6 +177,8 @@ class SessionManager(
       userData: UserData,
       portalType: AcademicPortalType = AcademicPortalType.UNKNOWN,
   ): UserSession {
+    GlobalAcademicPortalWarmupCoordinator.clear(candidate.username)
+
     // 登录期间 Cookie 只缓存在内存中，此处批量写回 Redis
     candidate.cookieStorage.flush()
     candidate.cookieStorage.setWriteThrough(true)
@@ -245,6 +247,7 @@ class SessionManager(
   }
 
   suspend fun invalidateSession(username: String) {
+    GlobalAcademicPortalWarmupCoordinator.clear(username)
     val existing = sessions.remove(username)
     if (existing != null) {
       clearCookieStorage(username, existing.cookieStorage)
@@ -262,6 +265,7 @@ class SessionManager(
     for ((username, session) in sessions.entries.toList()) {
       if (!session.isExpired(sessionTtl)) continue
       if (!sessions.remove(username, session)) continue
+      GlobalAcademicPortalWarmupCoordinator.clear(username)
       clearCookieStorage(username, session.cookieStorage)
       session.client.close()
       closeCookieStorage(session.cookieStorage)
@@ -293,6 +297,7 @@ class SessionManager(
   fun preLoginSessionCount(): Int = preLoginSessions.size
 
   fun close() {
+    sessions.keys.forEach { GlobalAcademicPortalWarmupCoordinator.clear(it) }
     sessions.values.forEach {
       it.client.close()
       closeCookieStorage(it.cookieStorage)

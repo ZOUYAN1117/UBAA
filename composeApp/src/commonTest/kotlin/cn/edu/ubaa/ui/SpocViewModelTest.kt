@@ -34,6 +34,7 @@ class SpocViewModelTest {
     setMainDispatcher(testScheduler)
     val viewModel = createViewModel(apiWithAssignments())
 
+    viewModel.ensureAssignmentsLoaded()
     advanceUntilIdle()
 
     val state = viewModel.uiState.value
@@ -54,6 +55,7 @@ class SpocViewModelTest {
             }
         )
 
+    viewModel.ensureAssignmentsLoaded()
     advanceUntilIdle()
 
     assertEquals("network failed", viewModel.uiState.value.error)
@@ -64,6 +66,7 @@ class SpocViewModelTest {
     setMainDispatcher(testScheduler)
     val viewModel = createViewModel(apiWithAssignments())
 
+    viewModel.ensureAssignmentsLoaded()
     advanceUntilIdle()
 
     assertEquals(
@@ -77,6 +80,7 @@ class SpocViewModelTest {
     setMainDispatcher(testScheduler)
     val viewModel = createViewModel(apiWithAssignments())
 
+    viewModel.ensureAssignmentsLoaded()
     advanceUntilIdle()
     viewModel.setShowExpired(true)
 
@@ -91,6 +95,7 @@ class SpocViewModelTest {
     setMainDispatcher(testScheduler)
     val viewModel = createViewModel(apiWithAssignments())
 
+    viewModel.ensureAssignmentsLoaded()
     advanceUntilIdle()
     viewModel.setShowOnlyUnsubmitted(true)
 
@@ -102,6 +107,7 @@ class SpocViewModelTest {
     setMainDispatcher(testScheduler)
     val viewModel = createViewModel(apiWithAssignments())
 
+    viewModel.ensureAssignmentsLoaded()
     advanceUntilIdle()
     viewModel.setSearchQuery("数据")
 
@@ -113,6 +119,7 @@ class SpocViewModelTest {
     setMainDispatcher(testScheduler)
     val viewModel = createViewModel(apiWithAssignments())
 
+    viewModel.ensureAssignmentsLoaded()
     advanceUntilIdle()
     viewModel.setSearchQuery("实验")
 
@@ -124,6 +131,7 @@ class SpocViewModelTest {
     setMainDispatcher(testScheduler)
     val viewModel = createViewModel(apiWithAssignments())
 
+    viewModel.ensureAssignmentsLoaded()
     advanceUntilIdle()
     viewModel.setSortField(SpocSortField.START_TIME)
 
@@ -138,6 +146,7 @@ class SpocViewModelTest {
     setMainDispatcher(testScheduler)
     val viewModel = createViewModel(apiWithAssignments())
 
+    viewModel.ensureAssignmentsLoaded()
     advanceUntilIdle()
     viewModel.toggleSortDirection()
 
@@ -152,6 +161,7 @@ class SpocViewModelTest {
     setMainDispatcher(testScheduler)
     val viewModel = createViewModel(apiWithAssignmentsAndDetail())
 
+    viewModel.ensureAssignmentsLoaded()
     advanceUntilIdle()
     viewModel.loadAssignmentDetail("a1")
     advanceUntilIdle()
@@ -167,6 +177,7 @@ class SpocViewModelTest {
     setMainDispatcher(testScheduler)
     val viewModel = createViewModel(apiWithAssignmentsAndDetail())
 
+    viewModel.ensureAssignmentsLoaded()
     advanceUntilIdle()
     viewModel.loadAssignmentDetail("a1")
     advanceUntilIdle()
@@ -176,6 +187,17 @@ class SpocViewModelTest {
     assertNull(state.assignmentDetail)
     assertNull(state.detailError)
     assertTrue(!state.isDetailLoading)
+  }
+
+  @Test
+  fun `does not fetch assignments before ensureAssignmentsLoaded`() = runTest {
+    setMainDispatcher(testScheduler)
+    val api = CountingSpocApi(apiWithAssignments())
+    createViewModel(api)
+
+    advanceUntilIdle()
+
+    assertEquals(0, api.assignmentCalls)
   }
 
   private fun createViewModel(api: SpocApi): SpocViewModel {
@@ -269,5 +291,21 @@ class SpocViewModelTest {
 
   companion object {
     private val FIXED_NOW = LocalDateTime.parse("2026-03-17T12:00:00")
+  }
+
+  private class CountingSpocApi(private val delegate: SpocApi) : SpocApi() {
+    var assignmentCalls = 0
+      private set
+
+    override suspend fun getAssignments(): Result<SpocAssignmentsResponse> {
+      assignmentCalls++
+      return delegate.getAssignments()
+    }
+
+    override suspend fun getAssignmentDetail(
+        assignmentId: String
+    ): Result<SpocAssignmentDetailDto> {
+      return delegate.getAssignmentDetail(assignmentId)
+    }
   }
 }

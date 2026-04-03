@@ -1,5 +1,8 @@
 package cn.edu.ubaa.auth
 
+import cn.edu.ubaa.metrics.LoginMetricsSink
+import cn.edu.ubaa.metrics.LoginSuccessMode
+import cn.edu.ubaa.metrics.NoOpLoginMetricsSink
 import cn.edu.ubaa.model.dto.LoginPreloadResponse
 import cn.edu.ubaa.model.dto.LoginRequest
 import cn.edu.ubaa.model.dto.LoginResponse
@@ -13,8 +16,8 @@ import io.ktor.client.request.*
 import io.ktor.client.request.forms.*
 import io.ktor.client.statement.*
 import io.ktor.http.*
-import kotlinx.coroutines.async
-import kotlinx.coroutines.coroutineScope
+import kotlin.time.Duration
+import kotlin.time.TimeSource
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.json.Json
 import org.slf4j.LoggerFactory
@@ -27,6 +30,9 @@ import org.slf4j.LoggerFactory
 class AuthService(
     private val sessionManager: SessionManager = GlobalSessionManager.instance,
     private val refreshTokenService: RefreshTokenService = GlobalRefreshTokenService.instance,
+    private val loginMetricsSink: LoginMetricsSink = NoOpLoginMetricsSink,
+    private val portalWarmupCoordinator: AcademicPortalWarmupCoordinator =
+        GlobalAcademicPortalWarmupCoordinator.instance,
 ) {
 
   internal fun interface DerivedClientFactory {
@@ -69,6 +75,7 @@ class AuthService(
    */
   suspend fun login(request: LoginRequest): LoginResponse {
     log.info("Starting login process for user: {}", request.username)
+    val timeline = LoginTimeline(request.username, log)
 
     val hasClientId = !request.clientId.isNullOrBlank()
     val hasExecution = !request.execution.isNullOrBlank()
@@ -77,12 +84,20 @@ class AuthService(
     if (!hasClientId && !hasExecution) {
       sessionManager.getSession(request.username, SessionManager.SessionAccess.READ_ONLY)?.let {
           existingSession ->
-        val cachedUser = runCatching { verifySession(existingSession.client) }.getOrNull()
-        val portalState =
-            runCatching { ByxtService.initializeSession(existingSession.client) }.getOrNull()
-        if (cachedUser != null && portalState?.isReady == true) {
-          sessionManager.updateSessionPortalType(request.username, portalState.portalType)
-          return refreshTokenService.issueLoginTokens(cachedUser, request.username)
+        val cachedUser =
+            timeline.measure("ucVerify") {
+              runCatching { verifySession(existingSession.client) }.getOrNull()
+            }
+        if (cachedUser != null) {
+          timeline
+              .measure("issueTokens") {
+                maybeWarmupPortal(existingSession)
+                refreshTokenService.issueLoginTokens(cachedUser, request.username)
+              }
+              .also {
+                timeline.logSuccess("reused_session")
+                return it
+              }
         }
         sessionManager.invalidateSession(request.username)
       }
@@ -120,12 +135,15 @@ class AuthService(
               }
 
           val loginSubmitResponse =
-              noRedirectClient.post(LOGIN_URL) { setBody(FormDataContent(loginFormParameters)) }
+              timeline.measure("submitCas") {
+                noRedirectClient.post(LOGIN_URL) { setBody(FormDataContent(loginFormParameters)) }
+              }
 
           followRedirectsAndCheckError(loginSubmitResponse, noRedirectClient)
         } else {
           // 标准流程：先拉取登录页获取 execution
-          val loginPageResponse = noRedirectClient.get(LOGIN_URL)
+          val loginPageResponse =
+              timeline.measure("loadLoginPage") { noRedirectClient.get(LOGIN_URL) }
           if (
               !loginPageResponse.status.isSuccess() &&
                   loginPageResponse.status != HttpStatusCode.Found
@@ -152,41 +170,62 @@ class AuthService(
                     execution,
                 )
               }
-              val loginFormParameters = CasParser.buildCaptchaLoginParameters(request)
+              val loginFormParameters =
+                  CasParser.buildCasLoginParameters(
+                      loginPageHtml,
+                      request.copy(execution = execution),
+                  )
               val loginSubmitResponse =
-                  noRedirectClient.post(LOGIN_URL) { setBody(FormDataContent(loginFormParameters)) }
+                  timeline.measure("submitCas") {
+                    noRedirectClient.post(LOGIN_URL) {
+                      setBody(FormDataContent(loginFormParameters))
+                    }
+                  }
               followRedirectsAndCheckError(loginSubmitResponse, noRedirectClient)
             } else {
               val loginFormParameters = CasParser.buildCasLoginParameters(loginPageHtml, request)
               val loginSubmitResponse =
-                  noRedirectClient.post(LOGIN_URL) { setBody(FormDataContent(loginFormParameters)) }
+                  timeline.measure("submitCas") {
+                    noRedirectClient.post(LOGIN_URL) {
+                      setBody(FormDataContent(loginFormParameters))
+                    }
+                  }
               followRedirectsAndCheckError(loginSubmitResponse, noRedirectClient)
             }
           }
         }
       }
 
-      // 3. 激活相关子系统会话并验证（UC + BYXT 并行）
-      client.get(
-          VpnCipher.toVpnUrl(
-              "https://uc.buaa.edu.cn/api/login?target=https%3A%2F%2Fuc.buaa.edu.cn%2F%23%2Fuser%2Flogin"
-          )
-      )
-
-      val userData: UserData?
-      val portalState: AcademicPortalProbeResult
-      coroutineScope {
-        val portalJob = async { ByxtService.initializeSession(client) }
-        userData = verifySession(client)
-        portalState = portalJob.await()
+      // 3. 激活 UC 并验证核心会话（不再同步等待教务门户探活）
+      timeline.measure("activateUc") {
+        client.get(
+            VpnCipher.toVpnUrl(
+                "https://uc.buaa.edu.cn/api/login?target=https%3A%2F%2Fuc.buaa.edu.cn%2F%23%2Fuser%2Flogin"
+            )
+        )
       }
 
-      if (userData != null && portalState.isReady) {
-        sessionManager.commitSession(activeCandidate, userData, portalState.portalType)
+      val userData = timeline.measure("ucVerify") { verifySession(client) }
+
+      if (userData != null) {
+        val committedSession =
+            timeline.measure("commitSession") {
+              sessionManager.commitSession(activeCandidate, userData)
+            }
         committed = true
-        return refreshTokenService.issueLoginTokens(userData, activeCandidate.username)
+        val response =
+            timeline.measure("issueTokens") {
+              refreshTokenService.issueLoginTokens(userData, activeCandidate.username)
+            }
+        safeRecordLoginSuccess(activeCandidate.username, LoginSuccessMode.MANUAL)
+        timeline.measure("portalWarmupAsync") { maybeWarmupPortal(committedSession) }
+        timeline.logSuccess("manual")
+        return response
       }
-      failLogin("session verification failed or academic portal initialization failed")
+      failLogin("core session verification failed")
+    } catch (e: Exception) {
+      timeline.logFailure(e)
+      throw e
     } finally {
       if (!committed) {
         sessionCandidate?.let {
@@ -241,20 +280,16 @@ class AuthService(
               )
           )
 
-          val userData: UserData?
-          val portalState: AcademicPortalProbeResult
-          coroutineScope {
-            val portalJob = async { ByxtService.initializeSession(client) }
-            userData = verifySession(client)
-            portalState = portalJob.await()
-          }
+          val userData = verifySession(client)
 
-          if (userData != null && portalState.isReady && !userData.schoolid.isNullOrBlank()) {
+          if (userData != null && !userData.schoolid.isNullOrBlank()) {
             val sessionCandidate =
                 sessionManager.promotePreLoginSession(clientId, userData.schoolid)
             if (sessionCandidate != null) {
-              sessionManager.commitSession(sessionCandidate, userData, portalState.portalType)
+              val committedSession = sessionManager.commitSession(sessionCandidate, userData)
               val tokenResponse = refreshTokenService.issueTokens(sessionCandidate.username)
+              safeRecordLoginSuccess(sessionCandidate.username, LoginSuccessMode.PRELOAD_AUTO)
+              maybeWarmupPortal(committedSession)
               return@withNoRedirectClient LoginPreloadResponse(
                   captchaRequired = false,
                   clientId = clientId,
@@ -366,18 +401,26 @@ class AuthService(
       refreshTokenService.refreshTokens(refreshToken, sessionManager)
 
   suspend fun validateSession(session: SessionManager.UserSession): Boolean {
-    val userData: UserData?
-    val portalState: AcademicPortalProbeResult
-    coroutineScope {
-      val portalJob = async { ByxtService.initializeSession(session.client) }
-      userData = verifySession(session.client)
-      portalState = portalJob.await()
-    }
-    if (userData != null && portalState.isReady) {
-      sessionManager.updateSessionPortalType(session.username, portalState.portalType)
+    val userData = verifySession(session.client)
+    if (userData != null) {
+      maybeWarmupPortal(session)
       return true
     }
     return false
+  }
+
+  private suspend fun safeRecordLoginSuccess(username: String, mode: LoginSuccessMode) {
+    try {
+      loginMetricsSink.recordSuccess(username, mode)
+    } catch (e: Exception) {
+      log.warn("Failed to record login metrics for user {}", username, e)
+    }
+  }
+
+  private fun maybeWarmupPortal(session: SessionManager.UserSession) {
+    if (session.portalType == AcademicPortalType.UNKNOWN) {
+      portalWarmupCoordinator.warmup(session.username, session.client)
+    }
   }
 
   /**
@@ -423,5 +466,48 @@ class AuthService(
       failLogin("账号或密码错误")
     }
     return currentResponse
+  }
+}
+
+private class LoginTimeline(
+    private val username: String,
+    private val log: org.slf4j.Logger,
+) {
+  private val startMark = TimeSource.Monotonic.markNow()
+  private val stages = linkedMapOf<String, Duration>()
+
+  suspend fun <T> measure(stage: String, block: suspend () -> T): T {
+    val mark = TimeSource.Monotonic.markNow()
+    return block().also { stages[stage] = mark.elapsedNow() }
+  }
+
+  fun logSuccess(mode: String) {
+    log.info(
+        "Login timeline user={} mode={} total={} {}",
+        username,
+        mode,
+        startMark.elapsedNow().inWholeMilliseconds,
+        stageSummary(),
+    )
+  }
+
+  fun logFailure(error: Exception) {
+    log.warn(
+        "Login timeline user={} failed={} total={} {}",
+        username,
+        error::class.simpleName ?: "unknown",
+        startMark.elapsedNow().inWholeMilliseconds,
+        stageSummary(),
+    )
+  }
+
+  private fun stageSummary(): String {
+    return if (stages.isEmpty()) {
+      "stages=none"
+    } else {
+      stages.entries.joinToString(prefix = "stages=") { (name, duration) ->
+        "$name=${duration.inWholeMilliseconds}ms"
+      }
+    }
   }
 }

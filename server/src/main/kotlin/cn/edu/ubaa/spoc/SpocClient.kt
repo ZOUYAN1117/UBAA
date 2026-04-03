@@ -14,6 +14,8 @@ import io.ktor.http.ContentType
 import io.ktor.http.HttpHeaders
 import io.ktor.http.contentType
 import java.net.URI
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -31,6 +33,7 @@ internal open class SpocClient(
   private var token: String? = null
   private var refreshToken: String? = null
   private var roleCode: String? = null
+  private val authMutex = Mutex()
 
   open suspend fun getCurrentTerm(): SpocCurrentTermContent {
     return withAuthenticatedCall {
@@ -115,17 +118,21 @@ internal open class SpocClient(
   private suspend fun ensureLogin(forceRefresh: Boolean = false) {
     if (!forceRefresh && !token.isNullOrBlank() && !roleCode.isNullOrBlank()) return
 
-    val session = sessionManager.requireSession(username)
-    val tokens = fetchLoginTokens(session.client)
-    val casLogin = performCasLogin(session.client, tokens.token)
-    val resolvedRoleCode =
-        SpocParsers.resolveRoleCode(casLogin)
-            ?: throw SpocAuthenticationException("SPOC 登录成功但未获取到角色信息")
+    authMutex.withLock {
+      if (!forceRefresh && !token.isNullOrBlank() && !roleCode.isNullOrBlank()) return@withLock
 
-    token = tokens.token
-    refreshToken = tokens.refreshToken
-    roleCode = resolvedRoleCode
-    log.debug("SPOC login established for user: {}", username)
+      val session = sessionManager.requireSession(username)
+      val tokens = fetchLoginTokens(session.client)
+      val casLogin = performCasLogin(session.client, tokens.token)
+      val resolvedRoleCode =
+          SpocParsers.resolveRoleCode(casLogin)
+              ?: throw SpocAuthenticationException("SPOC 登录成功但未获取到角色信息")
+
+      token = tokens.token
+      refreshToken = tokens.refreshToken
+      roleCode = resolvedRoleCode
+      log.debug("SPOC login established for user: {}", username)
+    }
   }
 
   private suspend fun fetchLoginTokens(baseClient: HttpClient): SpocLoginTokens {

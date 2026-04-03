@@ -29,12 +29,14 @@ import cn.edu.ubaa.ui.screens.cgyy.CgyyLockCodeScreen
 import cn.edu.ubaa.ui.screens.cgyy.CgyyOrdersScreen
 import cn.edu.ubaa.ui.screens.cgyy.CgyyReserveFormScreen
 import cn.edu.ubaa.ui.screens.cgyy.CgyyReservePickerScreen
+import cn.edu.ubaa.ui.screens.cgyy.CgyyUiState
 import cn.edu.ubaa.ui.screens.cgyy.CgyyViewModel
 import cn.edu.ubaa.ui.screens.classroom.ClassroomQueryScreen
 import cn.edu.ubaa.ui.screens.classroom.ClassroomViewModel
 import cn.edu.ubaa.ui.screens.evaluation.EvaluationScreen
 import cn.edu.ubaa.ui.screens.evaluation.EvaluationViewModel
 import cn.edu.ubaa.ui.screens.exam.ExamScreen
+import cn.edu.ubaa.ui.screens.exam.ExamUiState
 import cn.edu.ubaa.ui.screens.exam.ExamViewModel
 import cn.edu.ubaa.ui.screens.menu.*
 import cn.edu.ubaa.ui.screens.schedule.CourseDetailScreen
@@ -48,6 +50,7 @@ import cn.edu.ubaa.ui.screens.spoc.SpocSortField
 import cn.edu.ubaa.ui.screens.spoc.SpocViewModel
 import cn.edu.ubaa.ui.screens.ygdk.YgdkClockinFormScreen
 import cn.edu.ubaa.ui.screens.ygdk.YgdkHomeScreen
+import cn.edu.ubaa.ui.screens.ygdk.YgdkUiState
 import cn.edu.ubaa.ui.screens.ygdk.YgdkViewModel
 import kotlin.time.Clock
 import kotlin.time.ExperimentalTime
@@ -101,6 +104,16 @@ fun MainAppScreen(
 ) {
   val navController = rememberNavigationController()
   val currentScreen = navController.currentScreen
+  val cgyyScreens = remember {
+    setOf(
+        AppScreen.CGYY_HOME,
+        AppScreen.CGYY_RESERVE_PICKER,
+        AppScreen.CGYY_RESERVE_FORM,
+        AppScreen.CGYY_ORDERS,
+        AppScreen.CGYY_LOCK_CODE,
+    )
+  }
+  val ygdkScreens = remember { setOf(AppScreen.YGDK_HOME, AppScreen.YGDK_FORM) }
 
   var selectedBottomTab by remember { mutableStateOf(BottomNavTab.HOME) }
   var showSidebar by remember { mutableStateOf(false) }
@@ -114,24 +127,45 @@ fun MainAppScreen(
           value = Clock.System.now().toLocalDateTime(TimeZone.currentSystemDefault())
         }
       }
+  var hasVisitedCgyy by remember { mutableStateOf(false) }
+  val shouldKeepCgyyViewModel = hasVisitedCgyy || currentScreen in cgyyScreens
 
   // 初始化各模块 ViewModel
   val scheduleViewModel: ScheduleViewModel = viewModel { ScheduleViewModel() }
   val scheduleUiState by scheduleViewModel.uiState.collectAsState()
   val todayScheduleState by scheduleViewModel.todayScheduleState.collectAsState()
 
-  val examViewModel: ExamViewModel = viewModel { ExamViewModel() }
-  val examUiState by examViewModel.uiState.collectAsState()
+  val examViewModel: ExamViewModel? =
+      if (currentScreen == AppScreen.EXAM) {
+        viewModel(key = "exam") { ExamViewModel() }
+      } else {
+        null
+      }
+  val examUiState = examViewModel?.uiState?.collectAsState()?.value ?: ExamUiState()
   var showExamTermMenu by remember { mutableStateOf(false) }
 
   val signinViewModel: SigninViewModel =
       viewModel(key = "signin-${userData.schoolid}") { SigninViewModel() }
   val signinUiState by signinViewModel.uiState.collectAsState()
-  val evaluationViewModel: EvaluationViewModel = viewModel { EvaluationViewModel() }
-  val cgyyViewModel: CgyyViewModel =
-      viewModel(key = "cgyy-${userData.schoolid}") { CgyyViewModel() }
-  val cgyyUiState by cgyyViewModel.uiState.collectAsState()
-  val classroomViewModel: ClassroomViewModel = viewModel { ClassroomViewModel() }
+  val evaluationViewModel: EvaluationViewModel? =
+      if (currentScreen == AppScreen.EVALUATION) {
+        viewModel(key = "evaluation") { EvaluationViewModel() }
+      } else {
+        null
+      }
+  val cgyyViewModel: CgyyViewModel? =
+      if (shouldKeepCgyyViewModel) {
+        viewModel(key = "cgyy-${userData.schoolid}") { CgyyViewModel() }
+      } else {
+        null
+      }
+  val cgyyUiState = cgyyViewModel?.uiState?.collectAsState()?.value ?: CgyyUiState()
+  val classroomViewModel: ClassroomViewModel? =
+      if (currentScreen == AppScreen.CLASSROOM_QUERY) {
+        viewModel(key = "classroom") { ClassroomViewModel() }
+      } else {
+        null
+      }
   val spocViewModel: SpocViewModel =
       viewModel(key = "spoc-${userData.schoolid}") { SpocViewModel() }
   val spocUiState by spocViewModel.uiState.collectAsState()
@@ -140,9 +174,13 @@ fun MainAppScreen(
   val bykcCoursesState by bykcViewModel.coursesState.collectAsState()
   val bykcDetailState by bykcViewModel.courseDetailState.collectAsState()
   val bykcChosenState by bykcViewModel.chosenCoursesState.collectAsState()
-  val ygdkViewModel: YgdkViewModel =
-      viewModel(key = "ygdk-${userData.schoolid}") { YgdkViewModel() }
-  val ygdkUiState by ygdkViewModel.uiState.collectAsState()
+  val ygdkViewModel: YgdkViewModel? =
+      if (currentScreen in ygdkScreens) {
+        viewModel(key = "ygdk-${userData.schoolid}") { YgdkViewModel() }
+      } else {
+        null
+      }
+  val ygdkUiState = ygdkViewModel?.uiState?.collectAsState()?.value ?: YgdkUiState()
 
   var selectedCourse by remember { mutableStateOf<CourseClass?>(null) }
   var selectedBykcCourseId by remember { mutableStateOf<Long?>(null) }
@@ -181,11 +219,10 @@ fun MainAppScreen(
   }
 
   fun refreshHomeData() {
-    scheduleViewModel.loadTodaySchedule()
-    bykcViewModel.loadChosenCourses()
-    spocViewModel.loadAssignments(refresh = true)
-    signinViewModel.loadTodayClasses()
-    cgyyViewModel.loadOrders()
+    scheduleViewModel.ensureTodayLoaded(forceRefresh = true)
+    bykcViewModel.ensureChosenCoursesLoaded(forceRefresh = true)
+    spocViewModel.ensureAssignmentsLoaded(forceRefresh = true)
+    signinViewModel.ensureTodayLoaded(forceRefresh = true)
   }
 
   /** 重置导航栈至指定根页面。 */
@@ -288,24 +325,59 @@ fun MainAppScreen(
         navigateTo(AppScreen.SPOC_ASSIGNMENT_DETAIL)
       }
       HomeTodoAction.OpenCgyyOrders -> {
-        cgyyViewModel.ensureOrdersLoaded()
+        cgyyViewModel?.ensureOrdersLoaded()
         navigateTo(AppScreen.CGYY_ORDERS)
       }
       is HomeTodoAction.SigninCourse -> signinViewModel.performSignin(action.courseId)
     }
   }
 
-  var previousScreen by remember { mutableStateOf<AppScreen?>(null) }
-
   LaunchedEffect(currentScreen) {
-    val isReturningToHome =
-        currentScreen == AppScreen.HOME &&
-            previousScreen != null &&
-            previousScreen != AppScreen.HOME
-    if (isReturningToHome) {
-      refreshHomeData()
+    if (currentScreen in cgyyScreens) {
+      hasVisitedCgyy = true
     }
-    previousScreen = currentScreen
+  }
+
+  LaunchedEffect(currentScreen, shouldKeepCgyyViewModel) {
+    when (currentScreen) {
+      AppScreen.HOME -> {
+        scheduleViewModel.ensureTodayLoaded()
+        signinViewModel.ensureTodayLoaded()
+        spocViewModel.ensureAssignmentsLoaded()
+        bykcViewModel.ensureChosenCoursesLoaded()
+      }
+      AppScreen.SCHEDULE -> scheduleViewModel.ensureScheduleLoaded()
+      AppScreen.EXAM -> examViewModel?.ensureLoaded()
+      AppScreen.BYKC_COURSES -> {
+        bykcViewModel.ensureProfileLoaded()
+        bykcViewModel.ensureCoursesLoaded(includeExpired = showBykcIncludeExpired)
+      }
+      AppScreen.BYKC_CHOSEN -> bykcViewModel.ensureChosenCoursesLoaded()
+      AppScreen.BYKC_STATISTICS -> bykcViewModel.ensureStatisticsLoaded()
+      AppScreen.SIGNIN -> signinViewModel.ensureTodayLoaded()
+      AppScreen.CGYY_HOME,
+      AppScreen.CGYY_RESERVE_PICKER,
+      AppScreen.CGYY_RESERVE_FORM -> {
+        cgyyViewModel?.ensureInitialDataLoaded()
+        cgyyViewModel?.setDefaultPhone(userInfo?.phone)
+      }
+      AppScreen.CGYY_ORDERS -> {
+        cgyyViewModel?.ensureInitialDataLoaded()
+        cgyyViewModel?.setDefaultPhone(userInfo?.phone)
+        cgyyViewModel?.ensureOrdersLoaded()
+      }
+      AppScreen.CGYY_LOCK_CODE -> {
+        cgyyViewModel?.ensureInitialDataLoaded()
+        cgyyViewModel?.setDefaultPhone(userInfo?.phone)
+        cgyyViewModel?.ensureLockCodeLoaded()
+      }
+      AppScreen.EVALUATION -> evaluationViewModel?.ensureLoaded()
+      AppScreen.SPOC_ASSIGNMENTS,
+      AppScreen.SPOC_ASSIGNMENT_DETAIL -> spocViewModel.ensureAssignmentsLoaded()
+      AppScreen.YGDK_HOME,
+      AppScreen.YGDK_FORM -> ygdkViewModel?.ensureLoaded()
+      else -> Unit
+    }
   }
 
   LaunchedEffect(currentScreen, signinUiState.signinResult) {
@@ -376,7 +448,7 @@ fun MainAppScreen(
                     DropdownMenuItem(
                         text = { Text(it.itemName) },
                         onClick = {
-                          examViewModel.selectTerm(it)
+                          examViewModel?.selectTerm(it)
                           showExamTermMenu = false
                         },
                     )
@@ -456,14 +528,14 @@ fun MainAppScreen(
                     navigateTo(AppScreen.COURSE_DETAIL)
                   },
               )
-          AppScreen.EXAM -> ExamScreen(viewModel = examViewModel)
+          AppScreen.EXAM -> examViewModel?.let { ExamScreen(viewModel = it) }
           AppScreen.COURSE_DETAIL -> selectedCourse?.let { CourseDetailScreen(course = it) }
           AppScreen.BYKC_HOME ->
               BykcHomeScreen(
                   onSelectCourseClick = { navigateTo(AppScreen.BYKC_COURSES) },
                   onMyCoursesClick = { navigateTo(AppScreen.BYKC_CHOSEN) },
                   onStatisticsClick = {
-                    bykcViewModel.loadStatistics()
+                    bykcViewModel.ensureStatisticsLoaded()
                     navigateTo(AppScreen.BYKC_STATISTICS)
                   },
               )
@@ -531,54 +603,64 @@ fun MainAppScreen(
                   onRefresh = { bykcViewModel.loadChosenCourses() },
               )
           AppScreen.CLASSROOM_QUERY ->
-              ClassroomQueryScreen(viewModel = classroomViewModel, onBackClick = { navigateBack() })
+              classroomViewModel?.let {
+                ClassroomQueryScreen(viewModel = it, onBackClick = { navigateBack() })
+              }
           AppScreen.CGYY_HOME ->
               CgyyHomeScreen(
                   onReserveClick = { navigateTo(AppScreen.CGYY_RESERVE_PICKER) },
                   onOrdersClick = {
-                    cgyyViewModel.ensureOrdersLoaded()
+                    cgyyViewModel?.ensureOrdersLoaded()
                     navigateTo(AppScreen.CGYY_ORDERS)
                   },
                   onLockCodeClick = { navigateTo(AppScreen.CGYY_LOCK_CODE) },
               )
           AppScreen.CGYY_RESERVE_PICKER ->
-              CgyyReservePickerScreen(
-                  viewModel = cgyyViewModel,
-                  onNext = { navigateTo(AppScreen.CGYY_RESERVE_FORM) },
-              )
+              cgyyViewModel?.let {
+                CgyyReservePickerScreen(
+                    viewModel = it,
+                    onNext = { navigateTo(AppScreen.CGYY_RESERVE_FORM) },
+                )
+              }
           AppScreen.CGYY_RESERVE_FORM ->
-              CgyyReserveFormScreen(
-                  viewModel = cgyyViewModel,
-                  onBackToSelection = { navigateBack() },
-                  onSubmitSuccess = { navigateTo(AppScreen.CGYY_ORDERS) },
-              )
-          AppScreen.CGYY_ORDERS -> CgyyOrdersScreen(viewModel = cgyyViewModel)
-          AppScreen.CGYY_LOCK_CODE -> CgyyLockCodeScreen(viewModel = cgyyViewModel)
-          AppScreen.EVALUATION -> EvaluationScreen(viewModel = evaluationViewModel)
+              cgyyViewModel?.let {
+                CgyyReserveFormScreen(
+                    viewModel = it,
+                    onBackToSelection = { navigateBack() },
+                    onSubmitSuccess = { navigateTo(AppScreen.CGYY_ORDERS) },
+                )
+              }
+          AppScreen.CGYY_ORDERS -> cgyyViewModel?.let { CgyyOrdersScreen(viewModel = it) }
+          AppScreen.CGYY_LOCK_CODE -> cgyyViewModel?.let { CgyyLockCodeScreen(viewModel = it) }
+          AppScreen.EVALUATION -> evaluationViewModel?.let { EvaluationScreen(viewModel = it) }
           AppScreen.YGDK_HOME ->
-              YgdkHomeScreen(
-                  uiState = ygdkUiState,
-                  onRefresh = { ygdkViewModel.refreshAll() },
-                  onLoadMore = { ygdkViewModel.loadMoreRecords() },
-                  onAddClick = { navigateTo(AppScreen.YGDK_FORM) },
-                  onMessageConsumed = { ygdkViewModel.clearSubmitMessage() },
-              )
+              ygdkViewModel?.let {
+                YgdkHomeScreen(
+                    uiState = ygdkUiState,
+                    onRefresh = { it.refreshAll() },
+                    onLoadMore = { it.loadMoreRecords() },
+                    onAddClick = { navigateTo(AppScreen.YGDK_FORM) },
+                    onMessageConsumed = { it.clearSubmitMessage() },
+                )
+              }
           AppScreen.YGDK_FORM ->
-              YgdkClockinFormScreen(
-                  uiState = ygdkUiState,
-                  imagePicker =
-                      cn.edu.ubaa.ui.common.util.rememberPlatformImagePicker(
-                          onImagePicked = { ygdkViewModel.setPhoto(it) },
-                          onError = { ygdkViewModel.showMessage(it) },
-                      ),
-                  onItemSelected = { ygdkViewModel.updateItemId(it) },
-                  onStartTimeChange = { ygdkViewModel.updateStartTime(it) },
-                  onEndTimeChange = { ygdkViewModel.updateEndTime(it) },
-                  onPlaceChange = { ygdkViewModel.updatePlace(it) },
-                  onShareChange = { ygdkViewModel.setShareToSquare(it) },
-                  onClearPhoto = { ygdkViewModel.clearPhoto() },
-                  onSubmit = { ygdkViewModel.submitClockin { navigateBack() } },
-              )
+              ygdkViewModel?.let { viewModel ->
+                YgdkClockinFormScreen(
+                    uiState = ygdkUiState,
+                    imagePicker =
+                        cn.edu.ubaa.ui.common.util.rememberPlatformImagePicker(
+                            onImagePicked = { viewModel.setPhoto(it) },
+                            onError = { viewModel.showMessage(it) },
+                        ),
+                    onItemSelected = { viewModel.updateItemId(it) },
+                    onStartTimeChange = { viewModel.updateStartTime(it) },
+                    onEndTimeChange = { viewModel.updateEndTime(it) },
+                    onPlaceChange = { viewModel.updatePlace(it) },
+                    onShareChange = { viewModel.setShareToSquare(it) },
+                    onClearPhoto = { viewModel.clearPhoto() },
+                    onSubmit = { viewModel.submitClockin { navigateBack() } },
+                )
+              }
           AppScreen.SPOC_ASSIGNMENTS ->
               SpocAssignmentsScreen(
                   viewModel = spocViewModel,

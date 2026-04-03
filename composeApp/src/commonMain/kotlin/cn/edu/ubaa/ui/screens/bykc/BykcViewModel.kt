@@ -18,7 +18,7 @@ data class BykcCoursesUiState(
     val totalPages: Int = 0,
     val currentPage: Int = 0,
     val pageSize: Int = 20,
-    val hasMorePages: Boolean = true,
+    val hasMorePages: Boolean = false,
     val error: String? = null,
     val profile: BykcUserProfileDto? = null,
 )
@@ -49,8 +49,14 @@ data class BykcStatisticsUiState(
 )
 
 /** 管理博雅课程功能模块状态的 ViewModel。 负责课程浏览、选课退选、签到以及统计数据的拉取。 */
-class BykcViewModel : ViewModel() {
-  private val bykcApi = BykcApi()
+class BykcViewModel(
+    private val bykcApi: BykcApi = BykcApi(),
+) : ViewModel() {
+  private var profileLoadedOnce = false
+  private var chosenLoadedOnce = false
+  private var statisticsLoadedOnce = false
+  private var coursesLoadedOnce = false
+  private var loadedCoursesIncludeExpired: Boolean? = null
 
   private val _coursesState = MutableStateFlow(BykcCoursesUiState())
   /** 课程列表状态流。 */
@@ -68,15 +74,31 @@ class BykcViewModel : ViewModel() {
   /** 统计数据状态流。 */
   val statisticsState: StateFlow<BykcStatisticsUiState> = _statisticsState.asStateFlow()
 
-  init {
+  fun ensureProfileLoaded(forceRefresh: Boolean = false) {
+    if (!forceRefresh && profileLoadedOnce) return
     loadProfile()
-    loadCourses()
+  }
+
+  fun ensureCoursesLoaded(includeExpired: Boolean = false, forceRefresh: Boolean = false) {
+    if (!forceRefresh && coursesLoadedOnce && loadedCoursesIncludeExpired == includeExpired) {
+      return
+    }
+    loadCourses(includeExpired = includeExpired)
+  }
+
+  fun ensureChosenCoursesLoaded(forceRefresh: Boolean = false) {
+    if (!forceRefresh && chosenLoadedOnce) return
     loadChosenCourses()
+  }
+
+  fun ensureStatisticsLoaded(forceRefresh: Boolean = false) {
+    if (!forceRefresh && statisticsLoadedOnce) return
     loadStatistics()
   }
 
   /** 加载用户的博雅修读次数统计。 */
   fun loadStatistics() {
+    statisticsLoadedOnce = true
     viewModelScope.launch {
       _statisticsState.value = _statisticsState.value.copy(isLoading = true, error = null)
       bykcApi
@@ -93,6 +115,7 @@ class BykcViewModel : ViewModel() {
 
   /** 加载用户的博雅基本资料。 */
   fun loadProfile() {
+    profileLoadedOnce = true
     viewModelScope.launch {
       bykcApi.getProfile().onSuccess {
         _coursesState.value = _coursesState.value.copy(profile = it)
@@ -108,24 +131,37 @@ class BykcViewModel : ViewModel() {
    * @param includeExpired 是否包含已过期课程。
    */
   fun loadCourses(page: Int = 1, size: Int = 20, includeExpired: Boolean = false) {
+    coursesLoadedOnce = true
+    loadedCoursesIncludeExpired = includeExpired
     viewModelScope.launch {
-      _coursesState.value = _coursesState.value.copy(isLoading = true, error = null)
+      _coursesState.value =
+          _coursesState.value.copy(
+              isLoading = true,
+              isLoadingMore = false,
+              error = null,
+          )
       bykcApi
           .getCourses(page, size, includeExpired)
           .onSuccess { resp ->
             _coursesState.value =
                 _coursesState.value.copy(
                     isLoading = false,
+                    isLoadingMore = false,
                     courses = resp.courses,
                     total = resp.total,
                     totalPages = resp.totalPages,
                     currentPage = resp.currentPage,
+                    pageSize = resp.pageSize,
                     hasMorePages = resp.currentPage < resp.totalPages,
                 )
           }
           .onFailure {
             _coursesState.value =
-                _coursesState.value.copy(isLoading = false, error = it.message ?: "加载课程列表失败")
+                _coursesState.value.copy(
+                    isLoading = false,
+                    isLoadingMore = false,
+                    error = it.message ?: "加载课程列表失败",
+                )
           }
     }
   }
@@ -133,23 +169,36 @@ class BykcViewModel : ViewModel() {
   /** 分页加载更多课程。 */
   fun loadMoreCourses(includeExpired: Boolean = false) {
     val current = _coursesState.value
-    if (current.isLoadingMore || !current.hasMorePages) return
+    if (
+        current.isLoading ||
+            current.isLoadingMore ||
+            current.currentPage < 1 ||
+            current.courses.isEmpty() ||
+            !current.hasMorePages
+    ) {
+      return
+    }
     viewModelScope.launch {
       _coursesState.value = current.copy(isLoadingMore = true)
       bykcApi
           .getCourses(current.currentPage + 1, current.pageSize, includeExpired)
           .onSuccess { resp ->
+            val latest = _coursesState.value
             _coursesState.value =
-                current.copy(
+                latest.copy(
                     isLoadingMore = false,
-                    courses = current.courses + resp.courses,
+                    courses = latest.courses + resp.courses,
+                    total = resp.total,
+                    totalPages = resp.totalPages,
                     currentPage = resp.currentPage,
+                    pageSize = resp.pageSize,
                     hasMorePages = resp.currentPage < resp.totalPages,
+                    error = null,
                 )
           }
           .onFailure {
-            _coursesState.value =
-                current.copy(isLoadingMore = false, error = it.message ?: "加载更多失败")
+            val latest = _coursesState.value
+            _coursesState.value = latest.copy(isLoadingMore = false, error = it.message ?: "加载更多失败")
           }
     }
   }
@@ -172,6 +221,7 @@ class BykcViewModel : ViewModel() {
 
   /** 获取当前已报名的课程列表。 */
   fun loadChosenCourses() {
+    chosenLoadedOnce = true
     viewModelScope.launch {
       _chosenCoursesState.value = _chosenCoursesState.value.copy(isLoading = true, error = null)
       bykcApi
@@ -202,7 +252,7 @@ class BykcViewModel : ViewModel() {
             onComplete(true, it.message)
             loadCourseDetail(courseId)
             loadChosenCourses()
-            loadCourses()
+            loadCourses(includeExpired = loadedCoursesIncludeExpired ?: false)
           }
           .onFailure {
             _courseDetailState.value =
@@ -230,7 +280,7 @@ class BykcViewModel : ViewModel() {
             onComplete(true, it.message)
             loadCourseDetail(courseId)
             loadChosenCourses()
-            loadCourses()
+            loadCourses(includeExpired = loadedCoursesIncludeExpired ?: false)
           }
           .onFailure {
             _courseDetailState.value =

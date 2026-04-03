@@ -10,6 +10,7 @@ import cn.edu.ubaa.model.dto.YgdkClockinSubmitResponse
 import cn.edu.ubaa.model.dto.YgdkOverviewResponse
 import cn.edu.ubaa.model.dto.YgdkRecordsPageResponse
 import cn.edu.ubaa.utils.JwtUtil
+import cn.edu.ubaa.utils.UpstreamTimeoutException
 import com.auth0.jwt.JWT
 import io.ktor.client.request.forms.MultiPartFormDataContent
 import io.ktor.client.request.forms.formData
@@ -54,6 +55,7 @@ class YgdkRoutesTest {
 
     assertEquals(HttpStatusCode.Unauthorized, response.status)
     assertTrue(response.bodyAsText().contains("invalid_token"))
+    assertTrue(response.bodyAsText().contains("登录状态已失效，请重新登录"))
   }
 
   @Test
@@ -137,6 +139,33 @@ class YgdkRoutesTest {
     assertEquals(ContentType.Image.PNG.toString(), fakeClient.uploadedMimeType)
   }
 
+  @Test
+  fun `GET overview returns gateway timeout when upstream is too slow`() = testApplication {
+    application {
+      testYgdkApp(
+          YgdkService(
+              clientProvider = {
+                object : RouteFakeYgdkClient() {
+                  override suspend fun getClassifyList(): List<YgdkClassifyRaw> {
+                    throw UpstreamTimeoutException("阳光打卡概览加载超时", "ygdk_timeout")
+                  }
+                }
+              }
+          )
+      )
+    }
+
+    val response =
+        client.get("/api/v1/ygdk/overview") {
+          header(HttpHeaders.Authorization, bearerToken("2418"))
+        }
+
+    assertEquals(HttpStatusCode.GatewayTimeout, response.status)
+    assertTrue(response.bodyAsText().contains("ygdk_timeout"))
+    assertTrue(response.bodyAsText().contains("阳光打卡服务响应超时，请稍后重试"))
+    assertTrue(response.bodyAsText().contains("阳光打卡概览加载超时").not())
+  }
+
   private fun Application.testYgdkApp(service: YgdkService) {
     install(ContentNegotiation) { json() }
     install(Authentication) {
@@ -151,7 +180,7 @@ class YgdkRoutesTest {
         challenge { _, _ ->
           call.respond(
               HttpStatusCode.Unauthorized,
-              JwtErrorResponse(JwtErrorDetails("invalid_token", "Invalid or expired JWT token")),
+              JwtErrorResponse(JwtErrorDetails("invalid_token", "登录状态已失效，请重新登录")),
           )
         }
       }
@@ -163,7 +192,7 @@ class YgdkRoutesTest {
     return "Bearer ${JwtUtil.generateToken(username, Duration.ofMinutes(30))}"
   }
 
-  private class RouteFakeYgdkClient :
+  private open class RouteFakeYgdkClient :
       YgdkClient(
           username = "2418",
           sessionManager =

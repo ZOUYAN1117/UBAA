@@ -1,4 +1,5 @@
 import org.gradle.api.file.DuplicatesStrategy
+import org.gradle.api.tasks.testing.Test
 
 plugins {
   // 引入 Kotlin JVM, Ktor, 序列化及 GraalVM 原生镜像插件
@@ -12,12 +13,15 @@ group = "cn.edu.ubaa"
 
 version = project.property("project.version").toString()
 
+val serverVersion = version.toString()
+
 application {
   mainClass.set("cn.edu.ubaa.ApplicationKt")
   val isDevelopment: Boolean = project.ext.has("development")
   applicationDefaultJvmArgs =
       listOf(
           "-Dio.ktor.development=$isDevelopment",
+          "-Dubaa.server.version=$serverVersion",
           "-Djava.awt.headless=true",
       )
 }
@@ -35,6 +39,8 @@ kotlin {
 
 tasks.processResources { duplicatesStrategy = DuplicatesStrategy.EXCLUDE }
 
+tasks.withType<Test>().configureEach { systemProperty("ubaa.server.version", serverVersion) }
+
 dependencies {
   // 依赖 shared 模块获取 DTO 和基础逻辑
   implementation(project(":shared"))
@@ -47,6 +53,7 @@ dependencies {
   implementation(libs.ktor.server.call.logging)
   implementation(libs.ktor.server.content.negotiation)
   implementation(libs.ktor.server.cors)
+  implementation(libs.ktor.server.status.pages)
   implementation(libs.ktor.server.metrics.micrometer)
   implementation(libs.micrometer.registry.prometheus)
   implementation(libs.ktor.serialization.kotlinx.json)

@@ -4,7 +4,9 @@ import cn.edu.ubaa.model.evaluation.EvaluationCourse
 import cn.edu.ubaa.model.evaluation.EvaluationCoursesResponse
 import cn.edu.ubaa.model.evaluation.EvaluationProgress
 import cn.edu.ubaa.model.evaluation.EvaluationResult
+import cn.edu.ubaa.utils.withUpstreamDeadline
 import kotlin.random.Random
+import kotlin.time.Duration.Companion.seconds
 import kotlinx.serialization.json.*
 import org.slf4j.LoggerFactory
 
@@ -27,59 +29,61 @@ class EvaluationService {
    * @return 包含所有课程和评教进度的响应对象。
    */
   suspend fun getAllCourses(username: String): EvaluationCoursesResponse {
-    val client = EvaluationClient(username)
-    if (!client.initSession()) {
-      log.warn("Failed to init SPOC session for user: $username")
-      return EvaluationCoursesResponse(
-          courses = emptyList(),
-          progress = EvaluationProgress(0, 0, 0),
-      )
-    }
-
-    val xnxq = client.fetchCurrentXnxq()
-    if (xnxq == null) {
-      log.warn("Failed to fetch xnxq for user: $username")
-      return EvaluationCoursesResponse(
-          courses = emptyList(),
-          progress = EvaluationProgress(0, 0, 0),
-      )
-    }
-
-    val tasks = client.fetchTasks()
-    // 使用 map 以课程唯一键去重，若任一来源标记已评教，则合并结果也标记已评教
-    val courseMap = mutableMapOf<String, EvaluationCourse>()
-
-    for (task in tasks) {
-      val questionnaires = client.fetchQuestionnaires(task.rwid)
-      for (wj in questionnaires) {
-        val msid = wj.msid ?: "1"
-
-        // 获取未评教课程 (sfyp=0)
-        val pendingCourses = client.fetchCourses(task.rwid, wj.wjid, xnxq, msid, "0")
-        mergeCourses(courseMap, pendingCourses, task.rwid, wj.wjid, xnxq, msid, false)
-
-        // 获取已评教课程 (sfyp=1)
-        val evaluatedCourses = client.fetchCourses(task.rwid, wj.wjid, xnxq, msid, "1")
-        mergeCourses(courseMap, evaluatedCourses, task.rwid, wj.wjid, xnxq, msid, true)
+    return withUpstreamDeadline(11.seconds, "评教列表加载超时", "evaluation_timeout") {
+      val client = EvaluationClient(username)
+      if (!client.initSession()) {
+        log.warn("Failed to init SPOC session for user: $username")
+        return@withUpstreamDeadline EvaluationCoursesResponse(
+            courses = emptyList(),
+            progress = EvaluationProgress(0, 0, 0),
+        )
       }
+
+      val xnxq = client.fetchCurrentXnxq()
+      if (xnxq == null) {
+        log.warn("Failed to fetch xnxq for user: $username")
+        return@withUpstreamDeadline EvaluationCoursesResponse(
+            courses = emptyList(),
+            progress = EvaluationProgress(0, 0, 0),
+        )
+      }
+
+      val tasks = client.fetchTasks()
+      // 使用 map 以课程唯一键去重，若任一来源标记已评教，则合并结果也标记已评教
+      val courseMap = mutableMapOf<String, EvaluationCourse>()
+
+      for (task in tasks) {
+        val questionnaires = client.fetchQuestionnaires(task.rwid)
+        for (wj in questionnaires) {
+          val msid = wj.msid ?: "1"
+
+          // 获取未评教课程 (sfyp=0)
+          val pendingCourses = client.fetchCourses(task.rwid, wj.wjid, xnxq, msid, "0")
+          mergeCourses(courseMap, pendingCourses, task.rwid, wj.wjid, xnxq, msid, false)
+
+          // 获取已评教课程 (sfyp=1)
+          val evaluatedCourses = client.fetchCourses(task.rwid, wj.wjid, xnxq, msid, "1")
+          mergeCourses(courseMap, evaluatedCourses, task.rwid, wj.wjid, xnxq, msid, true)
+        }
+      }
+
+      val allCourses = courseMap.values.toList()
+      val pendingCount = allCourses.count { !it.isEvaluated }
+      val evaluatedCount = allCourses.count { it.isEvaluated }
+
+      // 排序：未评教的在前，已评教的在后
+      val sortedCourses = allCourses.sortedBy { it.isEvaluated }
+
+      EvaluationCoursesResponse(
+          courses = sortedCourses,
+          progress =
+              EvaluationProgress(
+                  totalCourses = allCourses.size,
+                  evaluatedCourses = evaluatedCount,
+                  pendingCourses = pendingCount,
+              ),
+      )
     }
-
-    val allCourses = courseMap.values.toList()
-    val pendingCount = allCourses.count { !it.isEvaluated }
-    val evaluatedCount = allCourses.count { it.isEvaluated }
-
-    // 排序：未评教的在前，已评教的在后
-    val sortedCourses = allCourses.sortedBy { it.isEvaluated }
-
-    return EvaluationCoursesResponse(
-        courses = sortedCourses,
-        progress =
-            EvaluationProgress(
-                totalCourses = allCourses.size,
-                evaluatedCourses = evaluatedCount,
-                pendingCourses = pendingCount,
-            ),
-    )
   }
 
   /**

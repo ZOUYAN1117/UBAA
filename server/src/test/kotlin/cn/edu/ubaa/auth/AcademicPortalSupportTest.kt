@@ -11,10 +11,17 @@ import io.ktor.http.ContentType
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.headersOf
+import java.util.concurrent.atomic.AtomicInteger
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertNotNull
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 
 class AcademicPortalSupportTest {
@@ -156,6 +163,57 @@ class AcademicPortalSupportTest {
     val result = ByxtService.initializeSession(undergradSsoGraduateReadyMockClient())
 
     assertEquals(AcademicPortalProbeResult.GRADUATE_READY, result)
+  }
+
+  @Test
+  fun ensureUndergradPortalAccessReusesInflightWarmup() = runBlocking {
+    val sessionManager = createSessionManager()
+    val probeCalls = AtomicInteger(0)
+    val warmupCoordinator =
+        AcademicPortalWarmupCoordinator(
+            sessionManager = sessionManager,
+            portalProbe = {
+              probeCalls.incrementAndGet()
+              delay(50)
+              AcademicPortalProbeResult.UNDERGRAD_READY
+            },
+            scope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
+        )
+    val candidate = sessionManager.prepareSession("undergrad-user")
+    val session = sessionManager.commitSession(candidate, UserData("Alice", "2418"))
+
+    coroutineScope {
+      val first = async {
+        ensureUndergradPortalAccess(
+            sessionManager = sessionManager,
+            username = "undergrad-user",
+            session = session,
+            graduateUnsupportedMessage = "unsupported",
+            unavailableExceptionFactory = { IllegalStateException("unavailable") },
+            warmupCoordinator = warmupCoordinator,
+        )
+      }
+      val second = async {
+        ensureUndergradPortalAccess(
+            sessionManager = sessionManager,
+            username = "undergrad-user",
+            session = session,
+            graduateUnsupportedMessage = "unsupported",
+            unavailableExceptionFactory = { IllegalStateException("unavailable") },
+            warmupCoordinator = warmupCoordinator,
+        )
+      }
+      first.await()
+      second.await()
+    }
+
+    assertEquals(1, probeCalls.get())
+    assertEquals(
+        AcademicPortalType.UNDERGRAD,
+        sessionManager
+            .getSession("undergrad-user", SessionManager.SessionAccess.READ_ONLY)
+            ?.portalType,
+    )
   }
 
   private fun createSessionManager(): SessionManager {

@@ -35,3 +35,7 @@ class TermRepository(private val scheduleApi: ScheduleApi = ScheduleApi()) {
     }
   }
 }
+
+object GlobalTermRepository {
+  val instance: TermRepository by lazy { TermRepository() }
+}
