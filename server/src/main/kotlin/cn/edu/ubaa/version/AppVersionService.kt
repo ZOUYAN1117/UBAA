@@ -36,27 +36,38 @@ data class AppVersionRuntimeConfig(
         )
 
     internal fun loadServerVersion(): String {
-      loadVersionFromSystemProperty()?.let { return it }
-      loadVersionFromEnvironment()?.let { return it }
-      loadVersionFromEmbeddedResource()?.let { return it }
-      loadVersionFromGradlePropertiesFile()?.let { return it }
+      loadVersionFromSystemProperty()?.let {
+        return it
+      }
+      loadVersionFromEnvironment()?.let {
+        return it
+      }
+      loadVersionFromEmbeddedResource()?.let {
+        return it
+      }
+      loadVersionFromGradlePropertiesFile()?.let {
+        return it
+      }
       return UNKNOWN_SERVER_VERSION
     }
 
     private fun loadVersionFromSystemProperty(): String? =
-        System.getProperty("ubaa.server.version")
-            ?.trim()
-            ?.takeIf { it.isNotEmpty() && it != UNKNOWN_SERVER_VERSION }
+        System.getProperty("ubaa.server.version")?.trim()?.takeIf {
+          it.isNotEmpty() && it != UNKNOWN_SERVER_VERSION
+        }
 
     private fun loadVersionFromEnvironment(): String? =
-        System.getenv("UBAA_SERVER_VERSION")
-            ?.trim()
-            ?.takeIf { it.isNotEmpty() && it != UNKNOWN_SERVER_VERSION }
+        System.getenv("UBAA_SERVER_VERSION")?.trim()?.takeIf {
+          it.isNotEmpty() && it != UNKNOWN_SERVER_VERSION
+        }
 
     private fun loadVersionFromEmbeddedResource(): String? {
       val properties = Properties()
       val resourceStream =
-          AppVersionRuntimeConfig::class.java.classLoader?.getResourceAsStream(VERSION_RESOURCE_NAME)
+          AppVersionRuntimeConfig::class
+              .java
+              .classLoader
+              ?.getResourceAsStream(VERSION_RESOURCE_NAME)
       resourceStream?.use { properties.load(it) }
       return properties.getProperty("project.version")?.trim()?.takeIf { it.isNotEmpty() }
     }

@@ -8,8 +8,8 @@ import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.headersOf
 import io.ktor.serialization.kotlinx.json.json
-import java.util.Properties
 import io.ktor.utils.io.ByteReadChannel
+import java.util.Properties
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -191,7 +191,10 @@ class AppVersionServiceTest {
   @Test
   fun embeddedVersionResourceIsPackaged() {
     val resourceStream =
-        AppVersionRuntimeConfig::class.java.classLoader?.getResourceAsStream("ubaa-version.properties")
+        AppVersionRuntimeConfig::class
+            .java
+            .classLoader
+            ?.getResourceAsStream("ubaa-version.properties")
 
     assertNotNull(resourceStream)
 
