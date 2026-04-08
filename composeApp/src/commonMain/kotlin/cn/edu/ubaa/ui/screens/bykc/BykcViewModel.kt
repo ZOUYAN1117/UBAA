@@ -91,6 +91,8 @@ class BykcViewModel(
     loadChosenCourses()
   }
 
+  internal fun hasChosenCoursesLoaded(): Boolean = chosenLoadedOnce
+
   fun ensureStatisticsLoaded(forceRefresh: Boolean = false) {
     if (!forceRefresh && statisticsLoadedOnce) return
     loadStatistics()

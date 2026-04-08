@@ -30,6 +30,8 @@ fun EvaluationScreen(viewModel: EvaluationViewModel) {
   val uiState by viewModel.uiState.collectAsState()
 
   Scaffold(
+      contentWindowInsets =
+          WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal + WindowInsetsSides.Bottom),
       floatingActionButton = {
         // 仅当有选中的未评教课程且未在加载/提交时显示执行按钮
         val hasSelectedPending = uiState.courses.any { it.second && !it.first.isEvaluated }
@@ -42,7 +44,7 @@ fun EvaluationScreen(viewModel: EvaluationViewModel) {
               contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
           )
         }
-      }
+      },
   ) { padding ->
     Box(modifier = Modifier.fillMaxSize().padding(padding)) {
       Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {

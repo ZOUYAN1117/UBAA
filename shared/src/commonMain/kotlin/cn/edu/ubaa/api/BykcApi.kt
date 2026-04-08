@@ -55,10 +55,8 @@ class BykcApi(private val apiClient: ApiClient = ApiClientProvider.shared) {
 
       when (response.status) {
         HttpStatusCode.OK -> Result.success(response.body())
-        HttpStatusCode.NotFound -> Result.failure(UserFacingApiException("课程不存在或已下线"))
-        else -> {
-          Result.failure(UserFacingApiException(response.userFacingErrorMessage()))
-        }
+        HttpStatusCode.NotFound -> Result.failure(ApiCallException("课程不存在或已下线"))
+        else -> Result.failure(response.toApiCallException())
       }
     } catch (e: Exception) {
       Result.failure(e.toUserFacingApiException("课程详情加载失败，请稍后重试"))

@@ -29,6 +29,8 @@ fun SigninScreen(viewModel: SigninViewModel) {
   }
 
   Scaffold(
+      contentWindowInsets =
+          WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal + WindowInsetsSides.Bottom),
       snackbarHost = { SnackbarHost(snackbarHostState) },
       floatingActionButton = {
         FloatingActionButton(onClick = { viewModel.loadTodayClasses() }) {

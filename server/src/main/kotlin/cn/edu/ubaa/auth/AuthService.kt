@@ -10,15 +10,23 @@ import cn.edu.ubaa.model.dto.LoginResponse
 import cn.edu.ubaa.model.dto.TokenRefreshResponse
 import cn.edu.ubaa.model.dto.UserData
 import cn.edu.ubaa.model.dto.UserInfoResponse
+import cn.edu.ubaa.utils.UpstreamTimeoutException
 import cn.edu.ubaa.utils.VpnCipher
+import cn.edu.ubaa.utils.withUpstreamDeadline
 import io.ktor.client.HttpClient
 import io.ktor.client.call.*
 import io.ktor.client.request.*
 import io.ktor.client.request.forms.*
 import io.ktor.client.statement.*
 import io.ktor.http.*
+import java.util.concurrent.ConcurrentHashMap
 import kotlin.time.Duration
+import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.TimeSource
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.Semaphore
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.json.Json
 import org.slf4j.LoggerFactory
@@ -35,6 +43,24 @@ class AuthService(
     private val portalWarmupCoordinator: AcademicPortalWarmupCoordinator =
         GlobalAcademicPortalWarmupCoordinator.instance,
 ) {
+  internal sealed interface SessionValidationResult {
+    data class Valid(val userData: UserData) : SessionValidationResult
+
+    data object Invalid : SessionValidationResult
+
+    sealed interface RetryableFailure : SessionValidationResult {
+      val cause: Throwable?
+    }
+
+    data class Timeout(override val cause: Throwable? = null) : RetryableFailure
+
+    data class Error(override val cause: Throwable? = null) : RetryableFailure
+  }
+
+  private data class SessionValidationKey(
+      val subject: String,
+      val client: HttpClient,
+  )
 
   internal fun interface DerivedClientFactory {
     fun create(baseClient: HttpClient): DerivedClientHandle
@@ -56,6 +82,10 @@ class AuthService(
 
   private val log = LoggerFactory.getLogger(AuthService::class.java)
   private val GENERIC_LOGIN_ERROR = "出了点问题，请检查用户名和密码，或稍后重试"
+  private val loginMutexes = ConcurrentHashMap<String, Mutex>()
+  private val validationRequests =
+      ConcurrentHashMap<SessionValidationKey, CompletableDeferred<SessionValidationResult>>()
+  private val freshLoginBulkhead = Semaphore(AuthConfig.loginMaxConcurrency)
   internal var derivedClientFactory: DerivedClientFactory = DerivedClientFactory { baseClient ->
     ConfiguredDerivedClientHandle(baseClient)
   }
@@ -77,46 +107,270 @@ class AuthService(
   suspend fun login(request: LoginRequest): LoginResponse {
     log.info("Starting login process for user: {}", request.username)
     val timeline = LoginTimeline(request.username, log)
-
-    val hasClientId = !request.clientId.isNullOrBlank()
-    val hasExecution = !request.execution.isNullOrBlank()
-
-    // 1. 尝试复用或准备会话环境
-    if (!hasClientId && !hasExecution) {
-      sessionManager.getSession(request.username, SessionManager.SessionAccess.READ_ONLY)?.let {
-          existingSession ->
-        val cachedUser =
-            timeline.measure("ucVerify") {
-              runCatching { verifySession(existingSession.client) }.getOrNull()
-            }
-        if (cachedUser != null) {
-          timeline
-              .measure("issueTokens") {
-                maybeWarmupPortal(existingSession)
-                refreshTokenService.issueLoginTokens(cachedUser, request.username)
-              }
-              .also {
-                timeline.logSuccess("reused_session")
-                return it
-              }
+    return withUserLoginMutex(request.username) {
+      try {
+        if (request.execution.isNullOrBlank() && request.clientId.isNullOrBlank()) {
+          tryReuseCommittedSession(request, timeline)?.let { reusedResponse ->
+            AppObservability.recordLoginFlowEvent("login_reuse_hit")
+            timeline.logSuccess("reused_session")
+            return@withUserLoginMutex reusedResponse
+          }
         }
-        sessionManager.invalidateSession(request.username)
+
+        withFreshLoginPermit {
+          withUpstreamDeadline(
+              AuthConfig.loginTimeoutMillis.milliseconds,
+              "认证服务响应超时，请稍后重试",
+              "auth_upstream_timeout",
+          ) {
+            performFreshLogin(request, timeline)
+          }
+        }
+      } catch (e: Exception) {
+        timeline.logFailure(e)
+        throw e
       }
     }
+  }
+
+  /** 注销用户。 通知 SSO 并清理本地所有关联会话。 */
+  suspend fun logout(username: String) {
+    val session = sessionManager.getSession(username, SessionManager.SessionAccess.READ_ONLY)
+    if (session != null) {
+      try {
+        AppObservability.observeUpstreamRequest("sso", "logout") {
+          session.client.get(VpnCipher.toVpnUrl("https://sso.buaa.edu.cn/logout"))
+        }
+      } catch (e: Exception) {
+        log.warn("Error calling SSO logout: {}", e.message)
+      }
+    }
+    refreshTokenService.invalidate(username)
+    sessionManager.invalidateSession(username)
+  }
+
+  /**
+   * 登录预加载逻辑。 检测 SSO 是否已登录（自动登录），或返回登录所需的验证码信息。
+   *
+   * @param clientId 客户端 ID。
+   * @return 预加载结果。
+   */
+  suspend fun preloadLoginState(clientId: String): LoginPreloadResponse {
+    require(clientId.isNotBlank()) { "clientId is required" }
+    val preLoginCandidate = sessionManager.preparePreLoginSession(clientId)
+    val client = preLoginCandidate.client
+
+    return try {
+      withUpstreamDeadline(
+          AuthConfig.preloadTimeoutMillis.milliseconds,
+          "登录状态加载超时，请稍后重试",
+          "auth_upstream_timeout",
+      ) {
+        withNoRedirectClient(client) { noRedirectClient ->
+          val loginPageResponse =
+              AppObservability.observeUpstreamRequest("sso", "preload_sso_check") {
+                noRedirectClient.get(LOGIN_URL)
+              }
+
+          // 检测自动登录（已在 SSO 登录）
+          if (loginPageResponse.status.value in 300..399) {
+            AppObservability.observeUpstreamRequest("uc", "activate_login") {
+              client.get(
+                  VpnCipher.toVpnUrl(
+                      "https://uc.buaa.edu.cn/api/login?target=https%3A%2F%2Fuc.buaa.edu.cn%2F%23%2Fuser%2Flogin"
+                  )
+              )
+            }
+
+            when (
+                val validationResult =
+                    validateSession("preload:$clientId", client, recordShared = false)
+            ) {
+              is SessionValidationResult.Valid -> {
+                val userData = validationResult.userData
+                if (!userData.schoolid.isNullOrBlank()) {
+                  val sessionCandidate =
+                      sessionManager.promotePreLoginSession(clientId, userData.schoolid)
+                  if (sessionCandidate != null) {
+                    val committedSession = sessionManager.commitSession(sessionCandidate, userData)
+                    val tokenResponse = refreshTokenService.issueTokens(sessionCandidate.username)
+                    safeRecordLoginSuccess(
+                        userData.schoolid.ifBlank { sessionCandidate.username },
+                        LoginSuccessMode.PRELOAD_AUTO,
+                    )
+                    maybeWarmupPortal(committedSession)
+                    return@withNoRedirectClient LoginPreloadResponse(
+                        captchaRequired = false,
+                        clientId = clientId,
+                        accessToken = tokenResponse.accessToken,
+                        refreshToken = tokenResponse.refreshToken,
+                        accessTokenExpiresAt = tokenResponse.accessTokenExpiresAt,
+                        refreshTokenExpiresAt = tokenResponse.refreshTokenExpiresAt,
+                        userData = userData,
+                    )
+                  }
+                }
+              }
+              SessionValidationResult.Invalid ->
+                  return@withNoRedirectClient LoginPreloadResponse(
+                      captchaRequired = false,
+                      clientId = clientId,
+                  )
+              is SessionValidationResult.RetryableFailure ->
+                  throw authUpstreamTimeout(validationResult.cause)
+            }
+
+            return@withNoRedirectClient LoginPreloadResponse(
+                captchaRequired = false,
+                clientId = clientId,
+            )
+          }
+
+          if (loginPageResponse.status != HttpStatusCode.OK)
+              return@withNoRedirectClient LoginPreloadResponse(
+                  captchaRequired = false,
+                  clientId = clientId,
+              )
+
+          val loginPageHtml = loginPageResponse.bodyAsText()
+          val execution = CasParser.extractExecution(loginPageHtml)
+          val captchaInfo = CasParser.detectCaptcha(loginPageHtml, CAPTCHA_URL_BASE)
+
+          if (captchaInfo != null) {
+            val captchaImageBytes = getCaptchaImage(client, captchaInfo.id)
+            val base64Image =
+                captchaImageBytes?.let {
+                  "data:image/jpeg;base64," + java.util.Base64.getEncoder().encodeToString(it)
+                }
+            LoginPreloadResponse(
+                captchaRequired = true,
+                captcha = captchaInfo.copy(base64Image = base64Image),
+                execution = execution,
+                clientId = clientId,
+            )
+          } else {
+            LoginPreloadResponse(
+                captchaRequired = false,
+                execution = execution.takeIf { it.isNotBlank() },
+                clientId = clientId,
+            )
+          }
+        }
+      }
+    } catch (e: UpstreamTimeoutException) {
+      AppObservability.recordAuthPreloadResult("degraded_timeout")
+      sessionManager.cleanupPreLoginSession(clientId)
+      LoginPreloadResponse(captchaRequired = false, clientId = clientId)
+    } catch (e: Exception) {
+      AppObservability.recordAuthPreloadResult("degraded_error")
+      sessionManager.cleanupPreLoginSession(clientId)
+      LoginPreloadResponse(captchaRequired = false, clientId = clientId)
+    }
+  }
+
+  internal suspend fun <T> withNoRedirectClient(
+      baseClient: HttpClient,
+      block: suspend (HttpClient) -> T,
+  ): T {
+    val derivedClient = derivedClientFactory.create(baseClient)
+    return try {
+      block(derivedClient.client)
+    } finally {
+      derivedClient.close()
+    }
+  }
+
+  companion object {
+    private val LOGIN_URL = VpnCipher.toVpnUrl("https://sso.buaa.edu.cn/login")
+    private val UC_STATUS_URL = "https://uc.buaa.edu.cn/api/uc/status"
+    private val CAPTCHA_URL_BASE = VpnCipher.toVpnUrl("https://sso.buaa.edu.cn/captcha")
+  }
+
+  /** 获取验证码图片的字节数组。 */
+  suspend fun getCaptchaImage(client: HttpClient, captchaId: String): ByteArray? {
+    return try {
+      val response =
+          AppObservability.observeUpstreamRequest("sso", "captcha_fetch") {
+            client.get("$CAPTCHA_URL_BASE?captchaId=$captchaId")
+          }
+      if (response.status == HttpStatusCode.OK) response.body<ByteArray>() else null
+    } catch (e: Exception) {
+      null
+    }
+  }
+
+  suspend fun refreshTokens(refreshToken: String): TokenRefreshResponse? =
+      refreshTokenService.refreshTokens(refreshToken, sessionManager)
+
+  internal suspend fun validateSession(
+      session: SessionManager.UserSession
+  ): SessionValidationResult {
+    val validationResult = validateSession(session.username, session.client)
+    if (validationResult is SessionValidationResult.Valid) {
+      maybeWarmupPortal(session)
+    }
+    return validationResult
+  }
+
+  private suspend fun safeRecordLoginSuccess(username: String, mode: LoginSuccessMode) {
+    try {
+      loginMetricsSink.recordSuccess(username, mode)
+    } catch (e: Exception) {
+      log.warn("Failed to record login metrics for user {}", username, e)
+    }
+  }
+
+  private fun maybeWarmupPortal(session: SessionManager.UserSession) {
+    if (session.portalType == AcademicPortalType.UNKNOWN) {
+      portalWarmupCoordinator.warmup(session.username, session.client)
+    }
+  }
+
+  private suspend fun tryReuseCommittedSession(
+      request: LoginRequest,
+      timeline: LoginTimeline,
+  ): LoginResponse? {
+    val existingSession =
+        sessionManager.getSession(request.username, SessionManager.SessionAccess.READ_ONLY)
+            ?: return null
+    return when (
+        val validationResult =
+            timeline.measure("ucVerify") {
+              validateSession(existingSession.username, existingSession.client)
+            }
+    ) {
+      is SessionValidationResult.Valid ->
+          timeline.measure("issueTokens") {
+            maybeWarmupPortal(existingSession)
+            refreshTokenService.issueLoginTokens(validationResult.userData, request.username)
+          }
+      SessionValidationResult.Invalid -> {
+        sessionManager.invalidateSession(request.username)
+        null
+      }
+      is SessionValidationResult.RetryableFailure -> authUpstreamTimeout(validationResult.cause)
+    }
+  }
+
+  private suspend fun performFreshLogin(
+      request: LoginRequest,
+      timeline: LoginTimeline,
+  ): LoginResponse {
+    val hasClientId = !request.clientId.isNullOrBlank()
+    val hasExecution = !request.execution.isNullOrBlank()
 
     var sessionCandidate: SessionManager.SessionCandidate? = null
     var committed = false
 
     try {
       sessionCandidate =
-          if (hasClientId) {
+          if (hasClientId && hasExecution) {
             sessionManager.promotePreLoginSession(request.clientId!!, request.username)
                 ?: run {
-                  sessionManager.invalidateSession(request.username)
+                  AppObservability.recordLoginFlowEvent("login_prelogin_miss")
                   sessionManager.prepareSession(request.username)
                 }
           } else {
-            sessionManager.invalidateSession(request.username)
             sessionManager.prepareSession(request.username)
           }
 
@@ -124,9 +378,7 @@ class AuthService(
       val client = activeCandidate.client
 
       withNoRedirectClient(client) { noRedirectClient ->
-        // 2. 提交登录表单
         if (hasExecution) {
-          // 直接提交（来自客户端的 preload 结果）
           val execution = request.execution!!
           val loginFormParameters =
               if (!request.captcha.isNullOrBlank()) {
@@ -144,7 +396,6 @@ class AuthService(
 
           followRedirectsAndCheckError(loginSubmitResponse, noRedirectClient)
         } else {
-          // 标准流程：先拉取登录页获取 execution
           val loginPageResponse =
               timeline.measure("loadLoginPage") {
                 AppObservability.observeUpstreamRequest("sso", "load_login_page") {
@@ -165,7 +416,6 @@ class AuthService(
           if (execution.isNotBlank()) {
             val captchaInfo = CasParser.detectCaptcha(loginPageHtml, CAPTCHA_URL_BASE)
             if (captchaInfo != null) {
-              // 需要验证码但请求中未提供，则抛出异常让客户端处理
               if (request.captcha.isNullOrBlank()) {
                 val captchaImageBytes = getCaptchaImage(client, captchaInfo.id)
                 val base64Image =
@@ -207,7 +457,6 @@ class AuthService(
         }
       }
 
-      // 3. 激活 UC 并验证核心会话（不再同步等待教务门户探活）
       timeline.measure("activateUc") {
         AppObservability.observeUpstreamRequest("uc", "activate_login") {
           client.get(
@@ -218,30 +467,34 @@ class AuthService(
         }
       }
 
-      val userData = timeline.measure("ucVerify") { verifySession(client) }
-
-      if (userData != null) {
-        val committedSession =
-            timeline.measure("commitSession") {
-              sessionManager.commitSession(activeCandidate, userData)
-            }
-        committed = true
-        val response =
-            timeline.measure("issueTokens") {
-              refreshTokenService.issueLoginTokens(userData, activeCandidate.username)
-            }
-        safeRecordLoginSuccess(
-            userData.schoolid.ifBlank { activeCandidate.username },
-            LoginSuccessMode.MANUAL,
-        )
-        timeline.measure("portalWarmupAsync") { maybeWarmupPortal(committedSession) }
-        timeline.logSuccess("manual")
-        return response
+      when (
+          val validationResult =
+              timeline.measure("ucVerify") {
+                validateSession(activeCandidate.username, client, recordShared = false)
+              }
+      ) {
+        is SessionValidationResult.Valid -> {
+          val userData = validationResult.userData
+          val committedSession =
+              timeline.measure("commitSession") {
+                sessionManager.commitSession(activeCandidate, userData)
+              }
+          committed = true
+          val response =
+              timeline.measure("issueTokens") {
+                refreshTokenService.issueLoginTokens(userData, activeCandidate.username)
+              }
+          safeRecordLoginSuccess(
+              userData.schoolid.ifBlank { activeCandidate.username },
+              LoginSuccessMode.MANUAL,
+          )
+          timeline.measure("portalWarmupAsync") { maybeWarmupPortal(committedSession) }
+          timeline.logSuccess("manual")
+          return response
+        }
+        SessionValidationResult.Invalid -> failLogin("core session verification failed")
+        is SessionValidationResult.RetryableFailure -> authUpstreamTimeout(validationResult.cause)
       }
-      failLogin("core session verification failed")
-    } catch (e: Exception) {
-      timeline.logFailure(e)
-      throw e
     } finally {
       if (!committed) {
         sessionCandidate?.let {
@@ -259,199 +512,128 @@ class AuthService(
     }
   }
 
-  /** 注销用户。 通知 SSO 并清理本地所有关联会话。 */
-  suspend fun logout(username: String) {
-    val session = sessionManager.getSession(username, SessionManager.SessionAccess.READ_ONLY)
-    if (session != null) {
-      try {
-        AppObservability.observeUpstreamRequest("sso", "logout") {
-          session.client.get(VpnCipher.toVpnUrl("https://sso.buaa.edu.cn/logout"))
-        }
-      } catch (e: Exception) {
-        log.warn("Error calling SSO logout: {}", e.message)
-      }
+  private suspend fun <T> withUserLoginMutex(username: String, block: suspend () -> T): T {
+    val mutex = loginMutexes.computeIfAbsent(username) { Mutex() }
+    val acquiredImmediately = mutex.tryLock()
+    if (!acquiredImmediately) {
+      AppObservability.recordLoginFlowEvent("login_mutex_wait")
+      mutex.lock()
     }
-    refreshTokenService.invalidate(username)
-    sessionManager.invalidateSession(username)
-  }
-
-  /**
-   * 登录预加载逻辑。 检测 SSO 是否已登录（自动登录），或返回登录所需的验证码信息。
-   *
-   * @param clientId 客户端 ID。
-   * @return 预加载结果。
-   */
-  suspend fun preloadLoginState(clientId: String): LoginPreloadResponse {
-    require(clientId.isNotBlank()) { "clientId is required" }
-    val preLoginCandidate = sessionManager.preparePreLoginSession(clientId)
-    val client = preLoginCandidate.client
-
-    return try {
-      withNoRedirectClient(client) { noRedirectClient ->
-        val loginPageResponse =
-            AppObservability.observeUpstreamRequest("sso", "preload_sso_check") {
-              noRedirectClient.get(LOGIN_URL)
-            }
-
-        // 检测自动登录（已在 SSO 登录）
-        if (loginPageResponse.status.value in 300..399) {
-          AppObservability.observeUpstreamRequest("uc", "activate_login") {
-            client.get(
-                VpnCipher.toVpnUrl(
-                    "https://uc.buaa.edu.cn/api/login?target=https%3A%2F%2Fuc.buaa.edu.cn%2F%23%2Fuser%2Flogin"
-                )
-            )
-          }
-
-          val userData = verifySession(client)
-
-          if (userData != null && !userData.schoolid.isNullOrBlank()) {
-            val sessionCandidate =
-                sessionManager.promotePreLoginSession(clientId, userData.schoolid)
-            if (sessionCandidate != null) {
-              val committedSession = sessionManager.commitSession(sessionCandidate, userData)
-              val tokenResponse = refreshTokenService.issueTokens(sessionCandidate.username)
-              safeRecordLoginSuccess(
-                  userData.schoolid.ifBlank { sessionCandidate.username },
-                  LoginSuccessMode.PRELOAD_AUTO,
-              )
-              maybeWarmupPortal(committedSession)
-              return@withNoRedirectClient LoginPreloadResponse(
-                  captchaRequired = false,
-                  clientId = clientId,
-                  accessToken = tokenResponse.accessToken,
-                  refreshToken = tokenResponse.refreshToken,
-                  accessTokenExpiresAt = tokenResponse.accessTokenExpiresAt,
-                  refreshTokenExpiresAt = tokenResponse.refreshTokenExpiresAt,
-                  userData = userData,
-              )
-            }
-          }
-          return@withNoRedirectClient LoginPreloadResponse(
-              captchaRequired = false,
-              clientId = clientId,
-          )
-        }
-
-        if (loginPageResponse.status != HttpStatusCode.OK)
-            return@withNoRedirectClient LoginPreloadResponse(
-                captchaRequired = false,
-                clientId = clientId,
-            )
-
-        val loginPageHtml = loginPageResponse.bodyAsText()
-        val execution = CasParser.extractExecution(loginPageHtml)
-        val captchaInfo = CasParser.detectCaptcha(loginPageHtml, CAPTCHA_URL_BASE)
-
-        if (captchaInfo != null) {
-          val captchaImageBytes = getCaptchaImage(client, captchaInfo.id)
-          val base64Image =
-              captchaImageBytes?.let {
-                "data:image/jpeg;base64," + java.util.Base64.getEncoder().encodeToString(it)
-              }
-          LoginPreloadResponse(
-              captchaRequired = true,
-              captcha = captchaInfo.copy(base64Image = base64Image),
-              execution = execution,
-              clientId = clientId,
-          )
-        } else {
-          LoginPreloadResponse(
-              captchaRequired = false,
-              execution = execution.takeIf { it.isNotBlank() },
-              clientId = clientId,
-          )
-        }
-      }
-    } catch (e: Exception) {
-      sessionManager.cleanupPreLoginSession(clientId)
-      LoginPreloadResponse(captchaRequired = false, clientId = clientId)
-    }
-  }
-
-  internal suspend fun <T> withNoRedirectClient(
-      baseClient: HttpClient,
-      block: suspend (HttpClient) -> T,
-  ): T {
-    val derivedClient = derivedClientFactory.create(baseClient)
-    return try {
-      block(derivedClient.client)
-    } finally {
-      derivedClient.close()
-    }
-  }
-
-  /** 访问状态接口验证当前客户端是否已成功认证。 */
-  private suspend fun verifySession(client: HttpClient): UserData? {
-    val statusResponse =
-        AppObservability.observeUpstreamRequest("uc", "fetch_uc_user") {
-          client.get(VpnCipher.toVpnUrl(UC_STATUS_URL)) {
-            header(HttpHeaders.Accept, "application/json, text/javascript, */*; q=0.01")
-            header("X-Requested-With", "XMLHttpRequest")
-          }
-        }
-    if (statusResponse.status != HttpStatusCode.OK) return null
-    val body = statusResponse.bodyAsText()
-    if (!body.trimStart().startsWith("{")) return null
-
-    return try {
-      val resp = Json.decodeFromString<UserInfoResponse>(body)
-      val data = resp.data
-      if (resp.code == 0 && data != null) {
-        UserData(name = data.name.orEmpty(), schoolid = data.schoolid.orEmpty())
-      } else {
-        log.warn("Verify session response code not 0: {}", resp.code)
-        null
-      }
-    } catch (e: Exception) {
-      log.warn("Verify session failed: {}", e.message)
-      null
-    }
-  }
-
-  companion object {
-    private val LOGIN_URL = VpnCipher.toVpnUrl("https://sso.buaa.edu.cn/login")
-    private val UC_STATUS_URL = "https://uc.buaa.edu.cn/api/uc/status"
-    private val CAPTCHA_URL_BASE = VpnCipher.toVpnUrl("https://sso.buaa.edu.cn/captcha")
-  }
-
-  /** 获取验证码图片的字节数组。 */
-  suspend fun getCaptchaImage(client: HttpClient, captchaId: String): ByteArray? {
-    return try {
-      val response =
-          AppObservability.observeUpstreamRequest("sso", "captcha_fetch") {
-            client.get("$CAPTCHA_URL_BASE?captchaId=$captchaId")
-          }
-      if (response.status == HttpStatusCode.OK) response.body<ByteArray>() else null
-    } catch (e: Exception) {
-      null
-    }
-  }
-
-  suspend fun refreshTokens(refreshToken: String): TokenRefreshResponse? =
-      refreshTokenService.refreshTokens(refreshToken, sessionManager)
-
-  suspend fun validateSession(session: SessionManager.UserSession): Boolean {
-    val userData = verifySession(session.client)
-    if (userData != null) {
-      maybeWarmupPortal(session)
-      return true
-    }
-    return false
-  }
-
-  private suspend fun safeRecordLoginSuccess(username: String, mode: LoginSuccessMode) {
     try {
-      loginMetricsSink.recordSuccess(username, mode)
-    } catch (e: Exception) {
-      log.warn("Failed to record login metrics for user {}", username, e)
+      return block()
+    } finally {
+      mutex.unlock()
+      if (!mutex.isLocked) {
+        loginMutexes.remove(username, mutex)
+      }
     }
   }
 
-  private fun maybeWarmupPortal(session: SessionManager.UserSession) {
-    if (session.portalType == AcademicPortalType.UNKNOWN) {
-      portalWarmupCoordinator.warmup(session.username, session.client)
+  private suspend fun <T> withFreshLoginPermit(block: suspend () -> T): T {
+    val acquiredImmediately = freshLoginBulkhead.tryAcquire()
+    if (!acquiredImmediately) {
+      AppObservability.recordLoginFlowEvent("login_bulkhead_wait")
+      freshLoginBulkhead.acquire()
     }
+    try {
+      return block()
+    } finally {
+      freshLoginBulkhead.release()
+    }
+  }
+
+  private suspend fun validateSession(
+      subject: String,
+      client: HttpClient,
+      recordShared: Boolean = true,
+  ): SessionValidationResult {
+    val key = SessionValidationKey(subject, client)
+    validationRequests[key]?.let { shared ->
+      if (recordShared) {
+        AppObservability.recordAuthValidationResult("shared")
+      }
+      return shared.await()
+    }
+
+    val deferred = CompletableDeferred<SessionValidationResult>()
+    val existing = validationRequests.putIfAbsent(key, deferred)
+    if (existing != null) {
+      if (recordShared) {
+        AppObservability.recordAuthValidationResult("shared")
+      }
+      return existing.await()
+    }
+
+    try {
+      val result = performSessionValidation(client)
+      deferred.complete(result)
+      return result
+    } catch (e: CancellationException) {
+      deferred.completeExceptionally(e)
+      throw e
+    } catch (e: Throwable) {
+      deferred.completeExceptionally(e)
+      throw e
+    } finally {
+      validationRequests.remove(key, deferred)
+    }
+  }
+
+  private suspend fun performSessionValidation(client: HttpClient): SessionValidationResult {
+    return try {
+      val validationResult =
+          withUpstreamDeadline(
+              AuthConfig.validationTimeoutMillis.milliseconds,
+              "认证服务响应超时，请稍后重试",
+              "auth_upstream_timeout",
+          ) {
+            val statusResponse =
+                AppObservability.observeUpstreamRequest("uc", "fetch_uc_user") {
+                  client.get(VpnCipher.toVpnUrl(UC_STATUS_URL)) {
+                    header(HttpHeaders.Accept, "application/json, text/javascript, */*; q=0.01")
+                    header("X-Requested-With", "XMLHttpRequest")
+                  }
+                }
+            if (statusResponse.status != HttpStatusCode.OK) {
+              return@withUpstreamDeadline SessionValidationResult.Invalid
+            }
+
+            val body = statusResponse.bodyAsText()
+            if (!body.trimStart().startsWith("{")) {
+              return@withUpstreamDeadline SessionValidationResult.Invalid
+            }
+
+            val resp = Json.decodeFromString<UserInfoResponse>(body)
+            val data = resp.data
+            if (resp.code == 0 && data != null) {
+              SessionValidationResult.Valid(
+                  UserData(name = data.name.orEmpty(), schoolid = data.schoolid.orEmpty())
+              )
+            } else {
+              log.warn("Verify session response code not 0: {}", resp.code)
+              SessionValidationResult.Invalid
+            }
+          }
+      when (validationResult) {
+        is SessionValidationResult.Valid -> AppObservability.recordAuthValidationResult("success")
+        SessionValidationResult.Invalid -> AppObservability.recordAuthValidationResult("invalid")
+        is SessionValidationResult.RetryableFailure -> Unit
+      }
+      validationResult
+    } catch (e: UpstreamTimeoutException) {
+      AppObservability.recordAuthValidationResult("timeout")
+      SessionValidationResult.Timeout(e)
+    } catch (e: CancellationException) {
+      throw e
+    } catch (e: Exception) {
+      AppObservability.recordAuthValidationResult("error")
+      log.warn("Verify session failed: {}", e.message)
+      SessionValidationResult.Error(e)
+    }
+  }
+
+  private fun authUpstreamTimeout(cause: Throwable? = null): Nothing {
+    throw UpstreamTimeoutException("认证服务响应超时，请稍后重试", "auth_upstream_timeout", cause)
   }
 
   /**

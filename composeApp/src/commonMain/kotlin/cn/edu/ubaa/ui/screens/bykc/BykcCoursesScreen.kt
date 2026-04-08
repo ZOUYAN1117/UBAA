@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.ExperimentalMaterialApi
@@ -37,6 +38,7 @@ fun BykcCoursesScreen(
     hasMorePages: Boolean,
     hideFullCourses: Boolean,
     error: String?,
+    listState: LazyListState,
     onCourseClick: (BykcCourseDto) -> Unit,
     onHideFullCoursesChange: (Boolean) -> Unit,
     onRefresh: () -> Unit,
@@ -87,6 +89,7 @@ fun BykcCoursesScreen(
         }
         else -> {
           LazyColumn(
+              state = listState,
               modifier = Modifier.fillMaxSize(),
               contentPadding = PaddingValues(16.dp),
               verticalArrangement = Arrangement.spacedBy(12.dp),
@@ -106,7 +109,7 @@ fun BykcCoursesScreen(
                 }
               }
             } else {
-              items(visibleCourses) { course ->
+              items(visibleCourses, key = { it.id }) { course ->
                 BykcCourseCard(course = course, now = now, onClick = { onCourseClick(course) })
               }
             }

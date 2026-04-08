@@ -4,11 +4,10 @@ import io.ktor.http.Cookie
 import io.ktor.http.CookieEncoding
 import io.ktor.http.Url
 import io.ktor.util.date.GMTDate
-import io.lettuce.core.api.sync.RedisCommands
-import kotlinx.coroutines.Dispatchers
+import io.lettuce.core.api.async.RedisAsyncCommands
+import kotlinx.coroutines.future.await
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
-import kotlinx.coroutines.withContext
 
 /**
  * 基于 Redis 实现的持久化 Cookie 存储，带内存写回缓存。
@@ -23,11 +22,11 @@ import kotlinx.coroutines.withContext
  * - [flush] 将脏数据批量写回 Redis（由外部在会话提交等关键节点调用）
  * - [clear] / [migrateTo] 会先刷新脏数据再操作
  *
- * @param commands 工厂提供的共享 Redis 同步命令对象。
+ * @param commands 工厂提供的共享 Redis 异步命令对象。
  * @param initialSubject 关联的用户名或预登录标识（隔离标识）。
  */
 class RedisCookieStorage(
-    private val commands: RedisCommands<String, String>,
+    private val commands: RedisAsyncCommands<String, String>,
     initialSubject: String,
 ) : ManagedCookieStorage {
   private val mutex = Mutex()
@@ -154,7 +153,7 @@ class RedisCookieStorage(
       cache = mutableMapOf()
       dirtyFields.clear()
       deletedFields.clear()
-      redis { commands.del(key) }
+      commands.del(key).await()
     }
   }
 
@@ -164,21 +163,19 @@ class RedisCookieStorage(
       // 先刷回本地修改
       flushInternal()
 
-      redis {
-        val cookieMap = commands.hgetall(key)
-        if (cookieMap.isEmpty()) {
-          commands.del(key)
+      val cookieMap = commands.hgetall(key).await().orEmpty()
+      if (cookieMap.isEmpty()) {
+        commands.del(key).await()
+      } else {
+        commands.del(targetKey).await()
+        commands.hset(targetKey, cookieMap).await()
+        val ttl = commands.ttl(key).await()
+        if (ttl != null && ttl > 0) {
+          commands.expire(targetKey, ttl).await()
         } else {
-          commands.del(targetKey)
-          commands.hset(targetKey, cookieMap)
-          val ttl = commands.ttl(key)
-          if (ttl != null && ttl > 0) {
-            commands.expire(targetKey, ttl)
-          } else {
-            commands.expire(targetKey, keyTtlSeconds)
-          }
-          commands.del(key)
+          commands.expire(targetKey, keyTtlSeconds).await()
         }
+        commands.del(key).await()
       }
 
       key = targetKey
@@ -190,7 +187,7 @@ class RedisCookieStorage(
 
   private suspend fun ensureCacheLoaded() {
     if (cache != null) return
-    cache = redis { commands.hgetall(key) }?.toMutableMap() ?: mutableMapOf()
+    cache = commands.hgetall(key).await()?.toMutableMap() ?: mutableMapOf()
   }
 
   private suspend fun flushInternal() {
@@ -198,22 +195,18 @@ class RedisCookieStorage(
     if (dirtyFields.isEmpty() && deletedFields.isEmpty()) return
     val batch = dirtyFields.mapNotNull { f -> map[f]?.let { f to it } }.toMap()
     val ttl = computeCacheTtlSeconds(map.values, System.currentTimeMillis())
-    redis {
-      if (deletedFields.isNotEmpty()) {
-        commands.hdel(key, *deletedFields.toTypedArray())
-      }
-      if (batch.isNotEmpty()) commands.hset(key, batch)
-      when {
-        map.isEmpty() -> commands.del(key)
-        ttl != null -> commands.expire(key, ttl)
-        else -> commands.expire(key, keyTtlSeconds)
-      }
+    if (deletedFields.isNotEmpty()) {
+      commands.hdel(key, *deletedFields.toTypedArray()).await()
+    }
+    if (batch.isNotEmpty()) commands.hset(key, batch).await()
+    when {
+      map.isEmpty() -> commands.del(key).await()
+      ttl != null -> commands.expire(key, ttl).await()
+      else -> commands.expire(key, keyTtlSeconds).await()
     }
     dirtyFields.clear()
     deletedFields.clear()
   }
-
-  private suspend fun <T> redis(block: () -> T): T = withContext(Dispatchers.IO) { block() }
 
   private fun serializeCookie(
       name: String,
@@ -254,21 +247,6 @@ class RedisCookieStorage(
         maxAge = parts[7].toIntOrNull() ?: -1,
         createdAt = parts[8].toLongOrNull() ?: 0L,
     )
-  }
-
-  private fun computeKeyTtlSeconds(expiresAt: Long?, maxAge: Int, createdAt: Long): Long {
-    val now = System.currentTimeMillis()
-    val cookieExpiryMs =
-        listOfNotNull(
-                expiresAt,
-                maxAge.takeIf { it >= 0 }?.let { createdAt + it * 1000L },
-            )
-            .minOrNull()
-    return if (cookieExpiryMs == null) {
-      keyTtlSeconds
-    } else {
-      ((cookieExpiryMs - now) / 1000).coerceAtLeast(1L)
-    }
   }
 
   private fun computeCacheTtlSeconds(values: Collection<String>, now: Long): Long? {

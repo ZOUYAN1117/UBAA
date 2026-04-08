@@ -5,10 +5,14 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
@@ -63,6 +67,8 @@ fun CgyyReserveFormScreen(
   val joinersError = hasTriedSubmit && uiState.joiners.isBlank()
 
   Scaffold(
+      contentWindowInsets =
+          WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal + WindowInsetsSides.Bottom),
       bottomBar = {
         Row(
             modifier = Modifier.fillMaxWidth().padding(16.dp),
@@ -84,7 +90,7 @@ fun CgyyReserveFormScreen(
             Text(if (uiState.isSubmitting) "提交中..." else "提交预约")
           }
         }
-      }
+      },
   ) { innerPadding ->
     Column(
         modifier =

@@ -172,6 +172,18 @@ object AppObservability {
     incrementCounter("ubaa.auth.session.resolve", mapOf("result" to result), amount)
   }
 
+  fun recordLoginFlowEvent(event: String, amount: Double = 1.0) {
+    incrementCounter("ubaa.auth.login.flow", mapOf("event" to event), amount)
+  }
+
+  fun recordAuthValidationResult(result: String, amount: Double = 1.0) {
+    incrementCounter("ubaa.auth.validation", mapOf("result" to result), amount)
+  }
+
+  fun recordAuthPreloadResult(result: String, amount: Double = 1.0) {
+    incrementCounter("ubaa.auth.preload", mapOf("result" to result), amount)
+  }
+
   fun recordCleanupRemovals(kind: String, count: Int) {
     if (count <= 0) return
     incrementCounter("ubaa.cleanup.removals", mapOf("kind" to kind), count.toDouble())

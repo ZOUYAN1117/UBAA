@@ -6,10 +6,14 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.ExperimentalMaterialApi
@@ -71,11 +75,20 @@ fun CgyyOrdersScreen(viewModel: CgyyViewModel) {
     )
   }
 
-  Scaffold(snackbarHost = { SnackbarHost(snackbarHostState) }) { paddingValues ->
+  Scaffold(
+      contentWindowInsets =
+          WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal + WindowInsetsSides.Bottom),
+      snackbarHost = { SnackbarHost(snackbarHostState) },
+  ) { paddingValues ->
     Box(modifier = Modifier.fillMaxSize().padding(paddingValues).pullRefresh(pullRefreshState)) {
       when {
         uiState.isOrdersLoading && uiState.orders.content.isEmpty() ->
-            CgyyLoadingState("正在加载预约记录...", modifier = Modifier.fillMaxSize())
+            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+              Text(
+                  text = "正在加载预约记录...",
+                  color = MaterialTheme.colorScheme.onSurfaceVariant,
+              )
+            }
         uiState.ordersError != null && uiState.orders.content.isEmpty() ->
             CgyyErrorState(
                 uiState.ordersError,

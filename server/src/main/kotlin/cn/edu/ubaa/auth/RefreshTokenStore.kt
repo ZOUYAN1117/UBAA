@@ -6,17 +6,16 @@ import cn.edu.ubaa.model.dto.UserData
 import cn.edu.ubaa.utils.JwtUtil
 import io.lettuce.core.RedisClient
 import io.lettuce.core.api.StatefulRedisConnection
-import io.lettuce.core.api.sync.RedisCommands
+import io.lettuce.core.api.async.RedisAsyncCommands
 import java.security.MessageDigest
 import java.security.SecureRandom
 import java.time.Duration
 import java.time.Instant
 import java.util.Base64
 import java.util.concurrent.ConcurrentHashMap
-import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.future.await
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
-import kotlinx.coroutines.withContext
 
 data class RefreshTokenRecord(
     val username: String,
@@ -46,7 +45,7 @@ interface RefreshTokenStore {
 class RedisRefreshTokenStore(private val redisUri: String) : RefreshTokenStore {
   private val client: RedisClient by lazy { RedisClient.create(redisUri) }
   private val connection: StatefulRedisConnection<String, String> by lazy { client.connect() }
-  private val commands: RedisCommands<String, String> by lazy { connection.sync() }
+  private val commands: RedisAsyncCommands<String, String> by lazy { connection.async() }
   private val mutexes = ConcurrentHashMap<String, Mutex>()
 
   override suspend fun saveToken(
@@ -66,7 +65,7 @@ class RedisRefreshTokenStore(private val redisUri: String) : RefreshTokenStore {
 
   override suspend fun findToken(token: String): RefreshTokenRecord? {
     val tokenHash = RefreshTokenUtil.hashToken(token)
-    val username = redis { commands.get(indexKey(tokenHash)) } ?: return null
+    val username = commands.get(indexKey(tokenHash)).await() ?: return null
     return withUserLock(username) {
       val record = readRecord(username) ?: return@withUserLock null
       if (record.tokenHash != tokenHash || record.expiresAt <= Instant.now()) {
@@ -117,15 +116,13 @@ class RedisRefreshTokenStore(private val redisUri: String) : RefreshTokenStore {
   }
 
   private suspend fun readRecord(username: String): RefreshTokenRecord? {
-    val raw = redis { commands.get(userKey(username)) } ?: return null
+    val raw = commands.get(userKey(username)).await() ?: return null
     val parts = raw.split("|")
     if (parts.size != 3) {
       // Malformed record: remove user key and, if possible, the indexed token hash
-      redis {
-        commands.del(userKey(username))
-        if (parts.isNotEmpty()) {
-          commands.del(indexKey(parts[0]))
-        }
+      commands.del(userKey(username)).await()
+      if (parts.isNotEmpty()) {
+        commands.del(indexKey(parts[0])).await()
       }
       return null
     }
@@ -134,10 +131,8 @@ class RedisRefreshTokenStore(private val redisUri: String) : RefreshTokenStore {
     val expiresAtMillis = parts[2].toLongOrNull()
     if (issuedAtMillis == null || expiresAtMillis == null) {
       // Malformed timestamps: clean up associated keys
-      redis {
-        commands.del(userKey(username))
-        commands.del(indexKey(tokenHash))
-      }
+      commands.del(userKey(username)).await()
+      commands.del(indexKey(tokenHash)).await()
       return null
     }
     val issuedAt = Instant.ofEpochMilli(issuedAtMillis)
@@ -152,30 +147,26 @@ class RedisRefreshTokenStore(private val redisUri: String) : RefreshTokenStore {
       expiresAt: Instant,
   ) {
     val ttlSeconds = ttlSecondsUntil(expiresAt)
-    redis {
-      commands.set(
-          userKey(username),
-          listOf(tokenHash, issuedAt.toEpochMilli(), expiresAt.toEpochMilli()).joinToString("|"),
-      )
-      commands.expire(userKey(username), ttlSeconds)
-      commands.set(indexKey(tokenHash), username)
-      commands.expire(indexKey(tokenHash), ttlSeconds)
-    }
+    commands
+        .set(
+            userKey(username),
+            listOf(tokenHash, issuedAt.toEpochMilli(), expiresAt.toEpochMilli()).joinToString("|"),
+        )
+        .await()
+    commands.expire(userKey(username), ttlSeconds).await()
+    commands.set(indexKey(tokenHash), username).await()
+    commands.expire(indexKey(tokenHash), ttlSeconds).await()
   }
 
   private suspend fun deleteRecord(username: String, tokenHash: String) {
-    redis {
-      commands.del(userKey(username))
-      commands.del(indexKey(tokenHash))
-    }
+    commands.del(userKey(username)).await()
+    commands.del(indexKey(tokenHash)).await()
   }
 
   private fun ttlSecondsUntil(expiresAt: Instant): Long {
     val ttl = Duration.between(Instant.now(), expiresAt).seconds
     return ttl.coerceAtLeast(1L)
   }
-
-  private suspend fun <T> redis(block: () -> T): T = withContext(Dispatchers.IO) { block() }
 
   private fun userKey(username: String): String = "refresh:user:$username"
 

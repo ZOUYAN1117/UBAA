@@ -32,6 +32,8 @@ class ScheduleViewModel(
     loadTodaySchedule()
   }
 
+  internal fun hasTodayLoaded(): Boolean = todayLoadedOnce
+
   fun ensureScheduleLoaded(forceRefresh: Boolean = false) {
     if (!forceRefresh && scheduleLoadedOnce) return
     loadTerms(forceRefresh)

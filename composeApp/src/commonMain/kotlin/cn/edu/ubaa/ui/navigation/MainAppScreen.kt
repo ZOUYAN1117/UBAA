@@ -4,6 +4,7 @@ import androidx.compose.animation.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Tune
@@ -99,9 +100,11 @@ enum class AppScreen {
 fun MainAppScreen(
     userData: UserData,
     userInfo: UserInfo?,
+    onEnsureUserInfo: () -> Unit,
     onLogoutClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+  val scope = rememberCoroutineScope()
   val navController = rememberNavigationController()
   val currentScreen = navController.currentScreen
   val cgyyScreens = remember {
@@ -118,6 +121,8 @@ fun MainAppScreen(
   var selectedBottomTab by remember { mutableStateOf(BottomNavTab.HOME) }
   var showSidebar by remember { mutableStateOf(false) }
   val homeSnackbarHostState = remember { SnackbarHostState() }
+  val homeBootstrapCoordinator = remember(scope) { HomeBootstrapCoordinator(scope) }
+  val homeBootstrapRunning by homeBootstrapCoordinator.isRunning.collectAsState()
   val homeNow by
       produceState(
           initialValue = Clock.System.now().toLocalDateTime(TimeZone.currentSystemDefault())
@@ -185,6 +190,7 @@ fun MainAppScreen(
   var selectedCourse by remember { mutableStateOf<CourseClass?>(null) }
   var selectedBykcCourseId by remember { mutableStateOf<Long?>(null) }
   var selectedBykcCourseSnapshot by remember { mutableStateOf<BykcCourseDto?>(null) }
+  val bykcCoursesListState = rememberLazyListState()
   var showBykcIncludeExpired by remember { mutableStateOf(false) }
   var hideBykcFullCourses by remember { mutableStateOf(false) }
   var selectedSpocAssignmentId by remember { mutableStateOf<String?>(null) }
@@ -206,7 +212,8 @@ fun MainAppScreen(
         )
       }
   val homeTodoLoading =
-      bykcChosenState.isLoading ||
+      homeBootstrapRunning ||
+          bykcChosenState.isLoading ||
           spocUiState.isLoading ||
           spocUiState.isRefreshing ||
           signinUiState.isLoading ||
@@ -218,11 +225,29 @@ fun MainAppScreen(
     if (signinUiState.error != null) add(HomeTodoSource.SIGNIN)
   }
 
+  fun startHomeBootstrap(forceRefresh: Boolean = false) {
+    val showLoading =
+        forceRefresh ||
+            !scheduleViewModel.hasTodayLoaded() ||
+            !signinViewModel.hasTodayLoaded() ||
+            !spocViewModel.hasAssignmentsLoaded() ||
+            !bykcViewModel.hasChosenCoursesLoaded()
+    homeBootstrapCoordinator.restart(
+        HomeBootstrapActions(
+            loadTodaySchedule = { force ->
+              scheduleViewModel.ensureTodayLoaded(forceRefresh = force)
+            },
+            loadSignin = { force -> signinViewModel.ensureTodayLoaded(forceRefresh = force) },
+            loadSpoc = { force -> spocViewModel.ensureAssignmentsLoaded(forceRefresh = force) },
+            loadBykc = { force -> bykcViewModel.ensureChosenCoursesLoaded(forceRefresh = force) },
+        ),
+        forceRefresh = forceRefresh,
+        showLoading = showLoading,
+    )
+  }
+
   fun refreshHomeData() {
-    scheduleViewModel.ensureTodayLoaded(forceRefresh = true)
-    bykcViewModel.ensureChosenCoursesLoaded(forceRefresh = true)
-    spocViewModel.ensureAssignmentsLoaded(forceRefresh = true)
-    signinViewModel.ensureTodayLoaded(forceRefresh = true)
+    startHomeBootstrap(forceRefresh = true)
   }
 
   /** 重置导航栈至指定根页面。 */
@@ -336,16 +361,17 @@ fun MainAppScreen(
     if (currentScreen in cgyyScreens) {
       hasVisitedCgyy = true
     }
+    if (currentScreen == AppScreen.MY) {
+      onEnsureUserInfo()
+    }
   }
 
   LaunchedEffect(currentScreen, shouldKeepCgyyViewModel) {
+    if (currentScreen != AppScreen.HOME) {
+      homeBootstrapCoordinator.cancel()
+    }
     when (currentScreen) {
-      AppScreen.HOME -> {
-        scheduleViewModel.ensureTodayLoaded()
-        signinViewModel.ensureTodayLoaded()
-        spocViewModel.ensureAssignmentsLoaded()
-        bykcViewModel.ensureChosenCoursesLoaded()
-      }
+      AppScreen.HOME -> startHomeBootstrap()
       AppScreen.SCHEDULE -> scheduleViewModel.ensureScheduleLoaded()
       AppScreen.EXAM -> examViewModel?.ensureLoaded()
       AppScreen.BYKC_COURSES -> {
@@ -423,57 +449,60 @@ fun MainAppScreen(
     Column(modifier = Modifier.fillMaxSize()) {
       val isRootScreen =
           currentScreen in listOf(AppScreen.HOME, AppScreen.REGULAR, AppScreen.ADVANCED)
-      AppTopBar(
-          title = screenTitle,
-          canNavigateBack = !isRootScreen,
-          onNavigationIconClick = {
-            if (isRootScreen) showSidebar = !showSidebar else navigateBack()
-          },
-          actions = {
-            // 特殊页面的顶部栏动作按钮
-            if (currentScreen == AppScreen.EXAM) {
-              Box {
-                TextButton(onClick = { showExamTermMenu = true }) {
-                  Text(examUiState.selectedTerm?.itemName ?: "选择学期")
-                  Icon(Icons.Default.ArrowDropDown, null)
-                }
-                DropdownMenu(
-                    expanded = showExamTermMenu,
-                    onDismissRequest = { showExamTermMenu = false },
-                ) {
-                  examUiState.terms.forEach {
-                    DropdownMenuItem(
-                        text = { Text(it.itemName) },
-                        onClick = {
-                          examViewModel?.selectTerm(it)
-                          showExamTermMenu = false
-                        },
-                    )
+      val showGlobalTopBar = currentScreen != AppScreen.SCHEDULE
+      if (showGlobalTopBar) {
+        AppTopBar(
+            title = screenTitle,
+            canNavigateBack = !isRootScreen,
+            onNavigationIconClick = {
+              if (isRootScreen) showSidebar = !showSidebar else navigateBack()
+            },
+            actions = {
+              // 特殊页面的顶部栏动作按钮
+              if (currentScreen == AppScreen.EXAM) {
+                Box {
+                  TextButton(onClick = { showExamTermMenu = true }) {
+                    Text(examUiState.selectedTerm?.itemName ?: "选择学期")
+                    Icon(Icons.Default.ArrowDropDown, null)
+                  }
+                  DropdownMenu(
+                      expanded = showExamTermMenu,
+                      onDismissRequest = { showExamTermMenu = false },
+                  ) {
+                    examUiState.terms.forEach {
+                      DropdownMenuItem(
+                          text = { Text(it.itemName) },
+                          onClick = {
+                            examViewModel?.selectTerm(it)
+                            showExamTermMenu = false
+                          },
+                      )
+                    }
                   }
                 }
+              } else if (currentScreen == AppScreen.BYKC_COURSES) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                  Text(
+                      text = "显示已过期",
+                      style = MaterialTheme.typography.labelMedium,
+                      modifier = Modifier.padding(end = 8.dp),
+                  )
+                  Checkbox(
+                      checked = showBykcIncludeExpired,
+                      onCheckedChange = {
+                        showBykcIncludeExpired = it
+                        bykcViewModel.loadCourses(includeExpired = it)
+                      },
+                  )
+                }
+              } else if (currentScreen == AppScreen.SPOC_ASSIGNMENTS) {
+                IconButton(onClick = { showSpocSortFilterDialog = true }) {
+                  Icon(Icons.Default.Tune, contentDescription = "排序和筛选")
+                }
               }
-            } else if (currentScreen == AppScreen.BYKC_COURSES) {
-              Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    text = "显示已过期",
-                    style = MaterialTheme.typography.labelMedium,
-                    modifier = Modifier.padding(end = 8.dp),
-                )
-                Checkbox(
-                    checked = showBykcIncludeExpired,
-                    onCheckedChange = {
-                      showBykcIncludeExpired = it
-                      bykcViewModel.loadCourses(includeExpired = it)
-                    },
-                )
-              }
-            } else if (currentScreen == AppScreen.SPOC_ASSIGNMENTS) {
-              IconButton(onClick = { showSpocSortFilterDialog = true }) {
-                Icon(Icons.Default.Tune, contentDescription = "排序和筛选")
-              }
-            }
-          },
-      )
+            },
+        )
+      }
 
       Box(modifier = Modifier.fillMaxWidth().weight(1f)) {
         when (currentScreen) {
@@ -520,6 +549,7 @@ fun MainAppScreen(
                   error = scheduleUiState.error,
                   onTermSelected = { scheduleViewModel.selectTerm(it) },
                   onWeekSelected = { scheduleViewModel.selectWeek(it) },
+                  onNavigateBack = { navigateBack() },
                   onCourseClick = {
                     selectedCourse = it
                     navigateTo(AppScreen.COURSE_DETAIL)
@@ -546,6 +576,7 @@ fun MainAppScreen(
                   hasMorePages = bykcCoursesState.hasMorePages,
                   hideFullCourses = hideBykcFullCourses,
                   error = bykcCoursesState.error,
+                  listState = bykcCoursesListState,
                   onCourseClick = {
                     selectedBykcCourseId = it.id
                     selectedBykcCourseSnapshot = it

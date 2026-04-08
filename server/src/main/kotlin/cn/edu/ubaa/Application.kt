@@ -65,7 +65,19 @@ fun main() {
   val log = LoggerFactory.getLogger("Application")
   log.info("Starting UBAA Server on $serverHost:$serverPort...")
 
-  embeddedServer(Netty, port = serverPort, host = serverHost, module = Application::module)
+  embeddedServer(
+          factory = Netty,
+          rootConfig = serverConfig { module { module() } },
+          configure = {
+            connector {
+              port = serverPort
+              host = serverHost
+            }
+            connectionGroupSize = 2
+            workerGroupSize = 8
+            callGroupSize = 16
+          },
+      )
       .start(wait = true)
 }
 

@@ -154,7 +154,7 @@ class AuthServiceLoginMetricsTest {
     val session =
         sessionManager.commitSession(candidate, UserData(name = "Alice", schoolid = "2333"))
 
-    assertTrue(authService.validateSession(session))
+    assertTrue(authService.validateSession(session) is AuthService.SessionValidationResult.Valid)
   }
 
   @Test

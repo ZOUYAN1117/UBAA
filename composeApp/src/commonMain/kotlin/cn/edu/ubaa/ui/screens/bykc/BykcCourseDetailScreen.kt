@@ -50,6 +50,8 @@ fun BykcCourseDetailScreen(
 
   Scaffold(
       modifier = modifier.fillMaxSize(),
+      contentWindowInsets =
+          WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal + WindowInsetsSides.Bottom),
       snackbarHost = { SnackbarHost(hostState = snackbarHostState) },
   ) { paddingValues ->
     Box(modifier = Modifier.fillMaxSize().padding(paddingValues)) {

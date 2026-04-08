@@ -12,7 +12,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.automirrored.filled.ArrowForward
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -43,6 +44,7 @@ import cn.edu.ubaa.model.dto.*
  * @param error 错误信息。
  * @param onTermSelected 学期选择回调。
  * @param onWeekSelected 周次选择回调。
+ * @param onNavigateBack 返回上一级页面的回调。
  * @param onCourseClick 点击课程单元格的回调。
  */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -57,6 +59,7 @@ fun ScheduleScreen(
     error: String?,
     onTermSelected: (Term) -> Unit,
     onWeekSelected: (Week) -> Unit,
+    onNavigateBack: () -> Unit,
     onCourseClick: (CourseClass) -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -67,6 +70,7 @@ fun ScheduleScreen(
       topBar = {
         ScheduleTopAppBar(
             title = selectedWeek?.name ?: "选择周次",
+            onNavigateBack = onNavigateBack,
             onPreviousClick = {
               if (currentWeekIndex > 0) onWeekSelected(weeks[currentWeekIndex - 1])
             },
@@ -138,6 +142,7 @@ fun ScheduleScreen(
 @Composable
 private fun ScheduleTopAppBar(
     title: String,
+    onNavigateBack: () -> Unit,
     onPreviousClick: () -> Unit,
     isPreviousEnabled: Boolean,
     onNextClick: () -> Unit,
@@ -145,6 +150,10 @@ private fun ScheduleTopAppBar(
     onTitleClick: () -> Unit,
 ) {
   CenterAlignedTopAppBar(
+      expandedHeight = 56.dp,
+      navigationIcon = {
+        IconButton(onClick = onNavigateBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "返回") }
+      },
       title = {
         Row(
             modifier = Modifier.clickable(onClick = onTitleClick),
@@ -160,10 +169,10 @@ private fun ScheduleTopAppBar(
       },
       actions = {
         IconButton(onClick = onPreviousClick, enabled = isPreviousEnabled) {
-          Icon(Icons.AutoMirrored.Filled.ArrowBack, "上一周")
+          Icon(Icons.AutoMirrored.Filled.KeyboardArrowLeft, "上一周")
         }
         IconButton(onClick = onNextClick, enabled = isNextEnabled) {
-          Icon(Icons.AutoMirrored.Filled.ArrowForward, "下一周")
+          Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, "下一周")
         }
       },
   )

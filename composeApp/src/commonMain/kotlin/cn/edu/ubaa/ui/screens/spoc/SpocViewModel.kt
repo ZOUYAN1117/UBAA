@@ -55,6 +55,8 @@ class SpocViewModel(
     loadAssignments(refresh = forceRefresh)
   }
 
+  internal fun hasAssignmentsLoaded(): Boolean = assignmentsLoadedOnce
+
   fun loadAssignments(refresh: Boolean = false) {
     assignmentsLoadedOnce = true
     viewModelScope.launch {
