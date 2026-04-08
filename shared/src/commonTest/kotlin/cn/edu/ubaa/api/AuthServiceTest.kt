@@ -255,4 +255,46 @@ class AuthServiceTest {
     assertTrue(result.isFailure)
     assertNull(AuthTokensStore.get())
   }
+
+  @Test
+  fun shouldPreserveStoredTokensWhenStatusTimesOutUpstream() = runTest {
+    AuthTokensStore.save(
+        StoredAuthTokens(
+            accessToken = "stale-access-token",
+            refreshToken = "stale-refresh-token",
+        )
+    )
+
+    val mockEngine = MockEngine { request ->
+      when (request.url.encodedPath) {
+        "/api/v1/auth/status" ->
+            respond(
+                content =
+                    ByteReadChannel(
+                        json.encodeToString(
+                            ApiErrorResponse(
+                                ApiErrorDetails(
+                                    code = "auth_upstream_timeout",
+                                    message = "认证服务响应超时，请稍后重试",
+                                )
+                            )
+                        )
+                    ),
+                status = HttpStatusCode.ServiceUnavailable,
+                headers = headersOf(HttpHeaders.ContentType, "application/json"),
+            )
+        else -> error("Unexpected path: ${request.url.encodedPath}")
+      }
+    }
+
+    val authService = AuthService(ApiClient(mockEngine))
+    val result = authService.getAuthStatus()
+
+    assertTrue(result.isFailure)
+    val exception = result.exceptionOrNull()
+    assertTrue(exception is ApiCallException)
+    assertEquals("auth_upstream_timeout", (exception as ApiCallException).code)
+    assertEquals("stale-access-token", AuthTokensStore.get()?.accessToken)
+    assertEquals("stale-refresh-token", AuthTokensStore.get()?.refreshToken)
+  }
 }

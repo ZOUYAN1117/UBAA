@@ -126,6 +126,7 @@ fun App() {
         MainAppScreen(
             userData = userData,
             userInfo = uiState.userInfo,
+            onEnsureUserInfo = { authViewModel.ensureUserInfoLoaded() },
             onLogoutClick = { authViewModel.logout() },
             modifier = Modifier.fillMaxSize(),
         )

@@ -5,6 +5,7 @@ import cn.edu.ubaa.model.dto.UserData
 import cn.edu.ubaa.utils.JwtUtil
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.cio.CIO
+import io.ktor.client.engine.cio.endpoint
 import io.ktor.client.plugins.HttpTimeout
 import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.client.plugins.cookies.CookiesStorage
@@ -449,6 +450,14 @@ object GlobalSessionManager {
 private fun buildManagedClient(cookieStorage: CookiesStorage): HttpClient {
   return HttpClient(CIO) {
     engine {
+      maxConnectionsCount = 16
+      requestTimeout = 30_000
+      endpoint {
+        maxConnectionsPerRoute = 8
+        keepAliveTime = 30_000
+        connectTimeout = 10_000
+        pipelineMaxSize = 4
+      }
       val proxyUrl = System.getenv("HTTPS_PROXY") ?: System.getenv("HTTP_PROXY")
       if (!proxyUrl.isNullOrBlank()) {
         proxy = io.ktor.client.engine.ProxyBuilder.http(io.ktor.http.Url(proxyUrl))

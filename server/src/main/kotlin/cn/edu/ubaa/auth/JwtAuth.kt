@@ -58,7 +58,9 @@ object JwtAuth {
   val ApplicationCall.jwtUsername: String?
     get() = principal<JWTPrincipal>()?.payload?.subject
 
-  suspend fun ApplicationCall.currentUserSession(): SessionManager.UserSession? {
+  suspend fun ApplicationCall.currentUserSession(
+      sessionManager: SessionManager = GlobalSessionManager.instance
+  ): SessionManager.UserSession? {
     attributes.getOrNull(sessionAttributeKey)?.let {
       return it
     }
@@ -69,13 +71,9 @@ object JwtAuth {
             val authHeader = request.headers[HttpHeaders.Authorization]
             if (authHeader?.startsWith("Bearer ") != true) return null
             val token = authHeader.removePrefix("Bearer ")
-            GlobalSessionManager.instance.getSessionByToken(
-                token,
-                SessionManager.SessionAccess.TOUCH,
-            )
+            sessionManager.getSessionByToken(token, SessionManager.SessionAccess.TOUCH)
           }
-          else ->
-              GlobalSessionManager.instance.getSession(username, SessionManager.SessionAccess.TOUCH)
+          else -> sessionManager.getSession(username, SessionManager.SessionAccess.TOUCH)
         } ?: return null
 
     attributes.put(sessionAttributeKey, session)
@@ -83,13 +81,18 @@ object JwtAuth {
   }
 
   /** Extension function to get the user session from the authenticated request. */
-  suspend fun ApplicationCall.getUserSession(): SessionManager.UserSession? {
-    return currentUserSession()
+  suspend fun ApplicationCall.getUserSession(
+      sessionManager: SessionManager = GlobalSessionManager.instance
+  ): SessionManager.UserSession? {
+    return currentUserSession(sessionManager)
   }
 
   /** Extension function to require a user session, throwing an exception if not found. */
-  suspend fun ApplicationCall.requireUserSession(): SessionManager.UserSession {
-    return currentUserSession() ?: throw IllegalStateException("No valid session found for request")
+  suspend fun ApplicationCall.requireUserSession(
+      sessionManager: SessionManager = GlobalSessionManager.instance
+  ): SessionManager.UserSession {
+    return currentUserSession(sessionManager)
+        ?: throw IllegalStateException("No valid session found for request")
   }
 }
 

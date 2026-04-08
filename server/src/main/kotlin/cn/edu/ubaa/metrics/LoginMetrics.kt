@@ -4,6 +4,7 @@ import cn.edu.ubaa.auth.AuthConfig
 import io.lettuce.core.RedisClient
 import io.lettuce.core.Value
 import io.lettuce.core.api.StatefulRedisConnection
+import io.lettuce.core.api.async.RedisAsyncCommands
 import io.lettuce.core.api.sync.RedisCommands
 import io.micrometer.core.instrument.MeterRegistry
 import java.nio.charset.StandardCharsets
@@ -13,8 +14,7 @@ import java.time.Duration
 import java.time.Instant
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicLong
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
+import kotlinx.coroutines.future.await
 import org.slf4j.LoggerFactory
 
 enum class LoginSuccessMode(val tagValue: String) {
@@ -122,7 +122,9 @@ class RedisLoginStatsStore(
 
   private val client: RedisClient by lazy { RedisClient.create(redisUri) }
   private val connection: StatefulRedisConnection<String, String> by lazy { client.connect() }
-  private val commands: RedisCommands<String, String> by lazy { connection.sync() }
+  private val asyncCommands: RedisAsyncCommands<String, String> by lazy { connection.async() }
+  // Gauge 回调是非 suspend 的，需要同步 API 读取
+  private val syncCommands: RedisCommands<String, String> by lazy { connection.sync() }
   private val keyTtl = Duration.ofDays(32)
   private val readCacheTtl = Duration.ofSeconds(15)
   private val windowCache = ConcurrentHashMap<WindowCacheKey, CachedWindowValue>()
@@ -139,13 +141,11 @@ class RedisLoginStatsStore(
     val usernameHash = hashUsername(userId)
     val ttlSeconds = keyTtl.seconds.coerceAtLeast(1L)
 
-    withContext(Dispatchers.IO) {
-      commands.incr(eventKey)
-      commands.expire(eventKey, ttlSeconds)
-      commands.pfadd(uniqueKey, usernameHash)
-      commands.expire(uniqueKey, ttlSeconds)
-      commands.incr(successTotalKey)
-    }
+    asyncCommands.incr(eventKey).await()
+    asyncCommands.expire(eventKey, ttlSeconds).await()
+    asyncCommands.pfadd(uniqueKey, usernameHash).await()
+    asyncCommands.expire(uniqueKey, ttlSeconds).await()
+    asyncCommands.incr(successTotalKey).await()
     windowCache.clear()
   }
 
@@ -155,7 +155,7 @@ class RedisLoginStatsStore(
       if (keys.isEmpty()) {
         0L
       } else {
-        sumCounterValues(commands.mget(*keys.toTypedArray()))
+        sumCounterValues(syncCommands.mget(*keys.toTypedArray()))
       }
     }
   }
@@ -166,13 +166,13 @@ class RedisLoginStatsStore(
       if (keys.isEmpty()) {
         0L
       } else {
-        commands.pfcount(*keys.toTypedArray())
+        syncCommands.pfcount(*keys.toTypedArray())
       }
     }
   }
 
   override fun countSuccessTotal(mode: LoginSuccessMode): Long {
-    return runCatching { commands.get(successTotalKey(mode))?.toLongOrNull() ?: 0L }
+    return runCatching { syncCommands.get(successTotalKey(mode))?.toLongOrNull() ?: 0L }
         .getOrDefault(0L)
   }
 

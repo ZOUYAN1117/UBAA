@@ -31,10 +31,10 @@ data class SessionStatusResponse(
  *
  * @param apiClient 使用的 ApiClient 实例，默认为单例 shared。
  */
-class AuthService(private val apiClient: ApiClient = ApiClientProvider.shared) {
+open class AuthService(private val apiClient: ApiClient = ApiClientProvider.shared) {
 
   /** 将本地存储的令牌应用到当前 ApiClient 中。 */
-  fun applyStoredTokens() {
+  open fun applyStoredTokens() {
     apiClient.applyStoredTokens()
   }
 
@@ -43,7 +43,7 @@ class AuthService(private val apiClient: ApiClient = ApiClientProvider.shared) {
    *
    * @return 预加载结果，包含验证码信息或已登录的令牌。
    */
-  suspend fun preloadLoginState(): Result<LoginPreloadResponse> {
+  open suspend fun preloadLoginState(): Result<LoginPreloadResponse> {
     return try {
       val clientId = ClientIdStore.getOrCreate()
       val response =
@@ -57,7 +57,7 @@ class AuthService(private val apiClient: ApiClient = ApiClientProvider.shared) {
           preloadResponse.toStoredAuthTokensOrNull()?.let { apiClient.updateTokens(it) }
           Result.success(preloadResponse)
         }
-        else -> Result.failure(UserFacingApiException(response.userFacingErrorMessage()))
+        else -> Result.failure(response.toApiCallException())
       }
     } catch (e: Exception) {
       Result.failure(e.toUserFacingApiException("登录状态加载失败，请稍后重试"))
@@ -73,7 +73,7 @@ class AuthService(private val apiClient: ApiClient = ApiClientProvider.shared) {
    * @param execution SSO 流程执行标识。
    * @return 登录结果，成功则返回 LoginResponse 并自动更新 ApiClient 令牌。
    */
-  suspend fun login(
+  open suspend fun login(
       username: String,
       password: String,
       captcha: String? = null,
@@ -93,8 +93,7 @@ class AuthService(private val apiClient: ApiClient = ApiClientProvider.shared) {
           apiClient.updateTokens(loginResponse.toStoredAuthTokens())
           Result.success(loginResponse)
         }
-        HttpStatusCode.Unauthorized ->
-            Result.failure(UserFacingApiException(response.userFacingErrorMessage()))
+        HttpStatusCode.Unauthorized -> Result.failure(response.toApiCallException())
         HttpStatusCode.UnprocessableEntity -> { // 422 - 需要验证码
           val captchaResponse = response.body<CaptchaRequiredResponse>()
           Result.failure(
@@ -105,7 +104,7 @@ class AuthService(private val apiClient: ApiClient = ApiClientProvider.shared) {
               )
           )
         }
-        else -> Result.failure(UserFacingApiException(response.userFacingErrorMessage()))
+        else -> Result.failure(response.toApiCallException())
       }
     } catch (e: Exception) {
       Result.failure(e.toUserFacingApiException("登录失败，请稍后重试"))
@@ -117,7 +116,7 @@ class AuthService(private val apiClient: ApiClient = ApiClientProvider.shared) {
    *
    * @return 包含用户信息和活动时间的 SessionStatusResponse。
    */
-  suspend fun getAuthStatus(): Result<SessionStatusResponse> {
+  open suspend fun getAuthStatus(): Result<SessionStatusResponse> {
     return safeApiCall { apiClient.getClient().get("api/v1/auth/status") }
   }
 
@@ -126,7 +125,7 @@ class AuthService(private val apiClient: ApiClient = ApiClientProvider.shared) {
    *
    * @return 注销操作结果。
    */
-  suspend fun logout(): Result<Unit> {
+  open suspend fun logout(): Result<Unit> {
     return try {
       // 尝试服务端注销
       val serverResponse = apiClient.getClient().post("api/v1/auth/logout")
@@ -176,13 +175,13 @@ private fun LoginPreloadResponse.toStoredAuthTokensOrNull(): StoredAuthTokens? {
  *
  * @param apiClient 使用的 ApiClient 实例。
  */
-class UserService(private val apiClient: ApiClient = ApiClientProvider.shared) {
+open class UserService(private val apiClient: ApiClient = ApiClientProvider.shared) {
   /**
    * 获取当前用户的详细资料信息。
    *
    * @return 包含用户姓名、学号等信息的 UserInfo。
    */
-  suspend fun getUserInfo(): Result<UserInfo> {
+  open suspend fun getUserInfo(): Result<UserInfo> {
     return safeApiCall { apiClient.getClient().get("api/v1/user/info") }
   }
 }

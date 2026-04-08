@@ -17,5 +17,16 @@ object AuthConfig {
 
   val sessionTtl: Duration = Duration.ofDays(env("SESSION_TTL_DAYS")?.toLongOrNull() ?: 7L)
 
+  val loginMaxConcurrency: Int = env("LOGIN_MAX_CONCURRENCY")?.toIntOrNull()?.coerceAtLeast(1) ?: 6
+
+  val validationTimeoutMillis: Long =
+      env("AUTH_VALIDATION_TIMEOUT_MS")?.toLongOrNull()?.coerceAtLeast(1L) ?: 3_000L
+
+  val preloadTimeoutMillis: Long =
+      env("AUTH_PRELOAD_TIMEOUT_MS")?.toLongOrNull()?.coerceAtLeast(1L) ?: 3_000L
+
+  val loginTimeoutMillis: Long =
+      env("AUTH_LOGIN_TIMEOUT_MS")?.toLongOrNull()?.coerceAtLeast(1L) ?: 18_000L
+
   private fun env(name: String): String? = dotenv[name] ?: System.getenv(name)
 }

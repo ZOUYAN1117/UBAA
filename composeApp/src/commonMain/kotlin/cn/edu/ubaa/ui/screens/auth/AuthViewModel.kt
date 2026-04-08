@@ -2,6 +2,7 @@ package cn.edu.ubaa.ui.screens.auth
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import cn.edu.ubaa.api.ApiCallException
 import cn.edu.ubaa.api.AuthService
 import cn.edu.ubaa.api.AuthTokensStore
 import cn.edu.ubaa.api.CaptchaRequiredClientException
@@ -16,9 +17,12 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
 /** 身份认证与用户信息管理的 ViewModel。 负责处理登录流程（含预加载和验证码）、自动登录逻辑、用户信息加载以及会话状态同步。 */
-class AuthViewModel : ViewModel() {
-  private val authService = AuthService()
-  private val userService = UserService()
+class AuthViewModel(
+    private val authService: AuthService = AuthService(),
+    private val userService: UserService = UserService(),
+) : ViewModel() {
+  private var userInfoLoadedOnce = false
+  private var userInfoLoading = false
 
   private val _uiState = MutableStateFlow(AuthUiState())
   /** 整体认证状态流。 */
@@ -94,8 +98,8 @@ class AuthViewModel : ViewModel() {
                       userData = response.userData,
                       accessToken = response.accessToken,
                   )
+              resetUserInfoState()
               _loginForm.value = LoginFormState()
-              loadUserInfo()
             } else {
               _uiState.value =
                   _uiState.value.copy(
@@ -162,11 +166,11 @@ class AuthViewModel : ViewModel() {
                     userData = loginResponse.user,
                     accessToken = loginResponse.accessToken,
                 )
+            resetUserInfoState()
             CredentialStore.setRememberPassword(form.rememberPassword)
             CredentialStore.setAutoLogin(form.autoLogin)
             if (form.rememberPassword) CredentialStore.saveCredentials(form.username, form.password)
             if (!form.rememberPassword) _loginForm.value = LoginFormState()
-            loadUserInfo()
           }
           .onFailure { exception ->
             if (exception is CaptchaRequiredClientException) {
@@ -207,10 +211,14 @@ class AuthViewModel : ViewModel() {
                     userData = status.user,
                     accessToken = storedAccessToken,
                 )
-            loadUserInfo()
+            resetUserInfoState()
           }
-          .onFailure {
+          .onFailure { error ->
             _uiState.value = _uiState.value.copy(isLoading = false)
+            if (error is ApiCallException && error.code == "auth_upstream_timeout") {
+              _uiState.value = _uiState.value.copy(error = error.message)
+              return@onFailure
+            }
             AuthTokensStore.clear()
             if (CredentialStore.isAutoLogin()) login() else preloadLoginState()
           }
@@ -224,29 +232,49 @@ class AuthViewModel : ViewModel() {
       authService
           .logout()
           .onSuccess {
+            resetUserInfoState()
             _uiState.value = AuthUiState()
             _loginForm.value = LoginFormState()
             preloadLoginState()
           }
           .onFailure {
+            resetUserInfoState()
             _uiState.value = AuthUiState(error = "注销完成但有警告: ${it.message}")
             preloadLoginState()
           }
     }
   }
 
-  /** 加载用户的详细档案信息。 */
-  private fun loadUserInfo() {
+  /** 按需加载用户的详细档案信息。 */
+  fun ensureUserInfoLoaded(forceRefresh: Boolean = false) {
+    if (userInfoLoading) return
+    if (!forceRefresh && (userInfoLoadedOnce || _uiState.value.userInfo != null)) {
+      return
+    }
+    userInfoLoading = true
     viewModelScope.launch {
-      userService.getUserInfo().onSuccess { info ->
-        _uiState.value = _uiState.value.copy(userInfo = info)
-      }
+      userService
+          .getUserInfo()
+          .onSuccess { info ->
+            userInfoLoadedOnce = true
+            _uiState.value = _uiState.value.copy(userInfo = info)
+          }
+          .onFailure {
+            userInfoLoadedOnce = false
+          }
+      userInfoLoading = false
     }
   }
 
   /** 清除当前的错误提示。 */
   fun clearError() {
     _uiState.value = _uiState.value.copy(error = null)
+  }
+
+  private fun resetUserInfoState() {
+    userInfoLoadedOnce = false
+    userInfoLoading = false
+    _uiState.value = _uiState.value.copy(userInfo = null)
   }
 }
 

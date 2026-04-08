@@ -39,6 +39,9 @@ class ApplicationMetricsTest {
       AppObservability.observeBusinessOperation("auth", "login") {}
       AppObservability.observeUpstreamRequest("uc", "fetch_uc_user") { "ok" }
       AppObservability.recordSessionResolve("memory_hit")
+      AppObservability.recordLoginFlowEvent("login_reuse_hit")
+      AppObservability.recordAuthValidationResult("success")
+      AppObservability.recordAuthPreloadResult("degraded_timeout")
       AppObservability.recordCleanupRemovals("session", 2)
       AppObservability.recordRetryEvent("cgyy", "submit_reservation", "captcha_retry")
       AppObservability.recordFallbackEvent(
@@ -62,6 +65,9 @@ class ApplicationMetricsTest {
     assertContains(metrics, "ubaa_business_operations_seconds_count")
     assertContains(metrics, "ubaa_upstream_requests_seconds_count")
     assertContains(metrics, "ubaa_auth_session_resolve_total")
+    assertContains(metrics, "ubaa_auth_login_flow_total")
+    assertContains(metrics, "ubaa_auth_validation_total")
+    assertContains(metrics, "ubaa_auth_preload_total")
     assertContains(metrics, "ubaa_cleanup_removals_total")
     assertContains(metrics, "ubaa_retry_events_total")
     assertContains(metrics, "ubaa_fallback_events_total")

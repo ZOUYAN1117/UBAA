@@ -35,6 +35,8 @@ class SigninViewModel(
     loadTodayClasses()
   }
 
+  internal fun hasTodayLoaded(): Boolean = loadedOnce
+
   /** 拉取今日所有可签到的课堂。 */
   fun loadTodayClasses() {
     loadedOnce = true

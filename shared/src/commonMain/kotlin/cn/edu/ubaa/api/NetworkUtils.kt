@@ -39,7 +39,11 @@ class CaptchaRequiredClientException(
     message: String,
 ) : Exception(message)
 
-@PublishedApi internal class UserFacingApiException(message: String) : Exception(message)
+class ApiCallException(
+    message: String,
+    val status: HttpStatusCode? = null,
+    val code: String? = null,
+) : Exception(message)
 
 internal fun userFacingMessageForCode(code: String?, status: HttpStatusCode): String {
   return when (code) {
@@ -49,6 +53,7 @@ internal fun userFacingMessageForCode(code: String?, status: HttpStatusCode): St
     "invalid_token",
     "unauthenticated",
     "unauthorized" -> "登录状态已失效，请重新登录"
+    "auth_upstream_timeout" -> "认证服务响应超时，请稍后重试"
     "captcha_not_found" -> "验证码已失效，请刷新后重试"
     "captcha_error" -> "验证码处理失败，请稍后重试"
     "missing_client_version" -> "缺少客户端版本信息"
@@ -104,17 +109,28 @@ internal suspend fun HttpResponse.userFacingErrorMessage(): String {
 }
 
 @PublishedApi
+internal suspend fun HttpResponse.toApiCallException(): ApiCallException {
+  val error = runCatching { body<ApiErrorResponse>() }.getOrNull()
+  val code = error?.error?.code
+  return ApiCallException(
+      message = userFacingMessageForCode(code, status),
+      status = status,
+      code = code,
+  )
+}
+
+@PublishedApi
 internal fun Throwable.toUserFacingApiException(
     defaultMessage: String = "网络异常，请检查连接后重试"
 ): Exception {
   if (this is CancellationException) throw this
   return when (this) {
-    is UserFacingApiException -> this
+    is ApiCallException -> this
     is CaptchaRequiredClientException -> this
     is HttpRequestTimeoutException,
     is ConnectTimeoutException,
-    is SocketTimeoutException -> UserFacingApiException("请求超时，请稍后重试")
-    else -> UserFacingApiException(defaultMessage)
+    is SocketTimeoutException -> ApiCallException("请求超时，请稍后重试")
+    else -> ApiCallException(defaultMessage)
   }
 }
 
@@ -130,9 +146,7 @@ suspend inline fun <reified T> safeApiCall(call: () -> HttpResponse): Result<T> 
     val response = call()
     when (response.status) {
       HttpStatusCode.OK -> Result.success(response.body<T>())
-      HttpStatusCode.Unauthorized -> {
-        Result.failure(UserFacingApiException(response.userFacingErrorMessage()))
-      }
+      HttpStatusCode.Unauthorized -> Result.failure(response.toApiCallException())
       HttpStatusCode.UnprocessableEntity -> {
         val error = runCatching { response.body<CaptchaRequiredResponse>() }.getOrNull()
         if (error != null) {
@@ -140,12 +154,10 @@ suspend inline fun <reified T> safeApiCall(call: () -> HttpResponse): Result<T> 
               CaptchaRequiredClientException(error.captcha, error.execution, error.message)
           )
         } else {
-          Result.failure(UserFacingApiException("需要验证码，请刷新后重试"))
+          Result.failure(ApiCallException("需要验证码，请刷新后重试"))
         }
       }
-      else -> {
-        Result.failure(UserFacingApiException(response.userFacingErrorMessage()))
-      }
+      else -> Result.failure(response.toApiCallException())
     }
   } catch (e: Exception) {
     Result.failure(e.toUserFacingApiException())

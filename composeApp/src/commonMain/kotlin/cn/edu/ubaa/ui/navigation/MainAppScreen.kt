@@ -99,9 +99,11 @@ enum class AppScreen {
 fun MainAppScreen(
     userData: UserData,
     userInfo: UserInfo?,
+    onEnsureUserInfo: () -> Unit,
     onLogoutClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+  val scope = rememberCoroutineScope()
   val navController = rememberNavigationController()
   val currentScreen = navController.currentScreen
   val cgyyScreens = remember {
@@ -118,6 +120,8 @@ fun MainAppScreen(
   var selectedBottomTab by remember { mutableStateOf(BottomNavTab.HOME) }
   var showSidebar by remember { mutableStateOf(false) }
   val homeSnackbarHostState = remember { SnackbarHostState() }
+  val homeBootstrapCoordinator = remember(scope) { HomeBootstrapCoordinator(scope) }
+  val homeBootstrapRunning by homeBootstrapCoordinator.isRunning.collectAsState()
   val homeNow by
       produceState(
           initialValue = Clock.System.now().toLocalDateTime(TimeZone.currentSystemDefault())
@@ -206,7 +210,8 @@ fun MainAppScreen(
         )
       }
   val homeTodoLoading =
-      bykcChosenState.isLoading ||
+      homeBootstrapRunning ||
+          bykcChosenState.isLoading ||
           spocUiState.isLoading ||
           spocUiState.isRefreshing ||
           signinUiState.isLoading ||
@@ -218,11 +223,27 @@ fun MainAppScreen(
     if (signinUiState.error != null) add(HomeTodoSource.SIGNIN)
   }
 
+  fun startHomeBootstrap(forceRefresh: Boolean = false) {
+    val showLoading =
+        forceRefresh ||
+            !scheduleViewModel.hasTodayLoaded() ||
+            !signinViewModel.hasTodayLoaded() ||
+            !spocViewModel.hasAssignmentsLoaded() ||
+            !bykcViewModel.hasChosenCoursesLoaded()
+    homeBootstrapCoordinator.restart(
+        HomeBootstrapActions(
+            loadTodaySchedule = { force -> scheduleViewModel.ensureTodayLoaded(forceRefresh = force) },
+            loadSignin = { force -> signinViewModel.ensureTodayLoaded(forceRefresh = force) },
+            loadSpoc = { force -> spocViewModel.ensureAssignmentsLoaded(forceRefresh = force) },
+            loadBykc = { force -> bykcViewModel.ensureChosenCoursesLoaded(forceRefresh = force) },
+        ),
+        forceRefresh = forceRefresh,
+        showLoading = showLoading,
+    )
+  }
+
   fun refreshHomeData() {
-    scheduleViewModel.ensureTodayLoaded(forceRefresh = true)
-    bykcViewModel.ensureChosenCoursesLoaded(forceRefresh = true)
-    spocViewModel.ensureAssignmentsLoaded(forceRefresh = true)
-    signinViewModel.ensureTodayLoaded(forceRefresh = true)
+    startHomeBootstrap(forceRefresh = true)
   }
 
   /** 重置导航栈至指定根页面。 */
@@ -336,16 +357,17 @@ fun MainAppScreen(
     if (currentScreen in cgyyScreens) {
       hasVisitedCgyy = true
     }
+    if (currentScreen == AppScreen.MY) {
+      onEnsureUserInfo()
+    }
   }
 
   LaunchedEffect(currentScreen, shouldKeepCgyyViewModel) {
+    if (currentScreen != AppScreen.HOME) {
+      homeBootstrapCoordinator.cancel()
+    }
     when (currentScreen) {
-      AppScreen.HOME -> {
-        scheduleViewModel.ensureTodayLoaded()
-        signinViewModel.ensureTodayLoaded()
-        spocViewModel.ensureAssignmentsLoaded()
-        bykcViewModel.ensureChosenCoursesLoaded()
-      }
+      AppScreen.HOME -> startHomeBootstrap()
       AppScreen.SCHEDULE -> scheduleViewModel.ensureScheduleLoaded()
       AppScreen.EXAM -> examViewModel?.ensureLoaded()
       AppScreen.BYKC_COURSES -> {
