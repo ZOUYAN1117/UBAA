@@ -338,7 +338,12 @@ internal class YgdkService(
     return YgdkTermSummaryDto(
         termId = term?.termId ?: term?.id,
         termName = term?.name,
-        termCount = count?.termGoodCountShow ?: count?.termGoodCount ?: count?.termCountShow ?: count?.termCount ?: 0,
+        termCount =
+            count?.termGoodCountShow
+                ?: count?.termGoodCount
+                ?: count?.termCountShow
+                ?: count?.termCount
+                ?: 0,
         termTarget = count?.termNum ?: classify.termNum,
         weekCount = count?.weekCount,
         weekTarget = count?.weekNum ?: classify.weekNum,
