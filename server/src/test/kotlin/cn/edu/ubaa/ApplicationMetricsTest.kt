@@ -1,5 +1,6 @@
 package cn.edu.ubaa
 
+import cn.edu.ubaa.health.RedisReadinessProbe
 import cn.edu.ubaa.metrics.AppObservability
 import cn.edu.ubaa.metrics.InMemoryLoginStatsStore
 import cn.edu.ubaa.metrics.LoginMetricsRecorder
@@ -103,6 +104,7 @@ class ApplicationMetricsTest {
         cn.edu.ubaa.cgyy.GlobalCgyyService.instance,
         cn.edu.ubaa.spoc.GlobalSpocService.instance,
         cn.edu.ubaa.ygdk.GlobalYgdkService.instance,
+        RedisReadinessProbe(),
     )
     registerPerformanceGauges(
         registry,
@@ -111,6 +113,7 @@ class ApplicationMetricsTest {
         cn.edu.ubaa.cgyy.GlobalCgyyService.instance,
         cn.edu.ubaa.spoc.GlobalSpocService.instance,
         cn.edu.ubaa.ygdk.GlobalYgdkService.instance,
+        RedisReadinessProbe(),
     )
 
     val customGaugeNames =
@@ -123,6 +126,7 @@ class ApplicationMetricsTest {
             "ubaa.spoc.cache",
             "ubaa.ygdk.cache",
             "ubaa.ygdk.context.cache",
+            "ubaa.redis.ready",
         )
     assertTrue(
         registry.meters
